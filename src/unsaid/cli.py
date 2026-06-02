@@ -34,11 +34,11 @@ def main(
     session = Session(engine, top_k=top_k)
 
     if prompt:
-        from .format import format_candidates
+        from .format import current_word_prefix, format_candidates
 
         cands = session.set_text(prompt)
         typer.echo(f"prefix: {prompt!r}")
-        typer.echo(format_candidates(cands))
+        typer.echo(format_candidates(cands, current_word_prefix(prompt)))
         raise typer.Exit()
 
     from .ui import UnsaidApp

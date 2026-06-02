@@ -16,9 +16,18 @@ from prompt_toolkit.layout import Layout
 from prompt_toolkit.layout.containers import HSplit, Window
 from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
 from prompt_toolkit.layout.dimension import Dimension
+from prompt_toolkit.styles import Style
 
-from .format import format_candidates
+from .format import StyledFragments, current_word_prefix, format_candidates_fragments
 from .session import Session
+
+_STYLE = Style.from_dict(
+    {
+        "prefix": "#888888",  # already-typed word context: dimmed
+        "token": "bold #00afff",  # the predicted next token: highlighted
+        "bar": "#5f8700",
+    }
+)
 
 
 class UnsaidApp:
@@ -28,7 +37,6 @@ class UnsaidApp:
         self._timer: threading.Timer | None = None
 
         self.input = Buffer(multiline=False, on_text_changed=self._on_text_changed)
-        self._panel_text = "(type to begin)"
 
         kb = self._make_keybindings()
         body = HSplit(
@@ -38,17 +46,22 @@ class UnsaidApp:
                     height=Dimension(min=1, max=3),
                 ),
                 Window(height=1, char="─"),
-                Window(FormattedTextControl(self._get_panel_text)),
+                Window(FormattedTextControl(self._get_panel_fragments)),
             ]
         )
         self.app: Application = Application(
             layout=Layout(body, focused_element=self.input),
             key_bindings=kb,
+            style=_STYLE,
             full_screen=True,
         )
 
-    def _get_panel_text(self) -> str:
-        return self._panel_text
+    def _get_panel_fragments(self) -> StyledFragments:
+        cands = self.session.candidates
+        if not cands:
+            return [("", "(type to begin)")]
+        prefix = current_word_prefix(self.session.text)
+        return format_candidates_fragments(cands, prefix)
 
     def _on_text_changed(self, _buf: Buffer) -> None:
         if self._timer is not None:
@@ -58,9 +71,7 @@ class UnsaidApp:
         self._timer.start()
 
     def _recompute_async(self) -> None:
-        text = self.input.text
-        cands = self.session.set_text(text)
-        self._panel_text = format_candidates(cands) if cands else "(no candidates)"
+        self.session.set_text(self.input.text)
         # Repaint from this background thread safely.
         self.app.invalidate()
 
@@ -70,11 +81,6 @@ class UnsaidApp:
         self.input.set_document(
             self.input.document.__class__(new_text, len(new_text)),
             bypass_readonly=True,
-        )
-        self._panel_text = (
-            format_candidates(self.session.candidates)
-            if self.session.candidates
-            else "(no candidates)"
         )
 
     def _make_keybindings(self) -> KeyBindings:
