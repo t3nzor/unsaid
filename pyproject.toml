@@ -1,0 +1,49 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "unsaid"
+version = "0.1.0"
+description = "Explore the web of the words left unsaid: a live next-token explorer for LLMs."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+dependencies = [
+    # torch and transformers are expected to be provided by the environment
+    # (see AGENTS.md). They are intentionally NOT pinned here so we don't
+    # reinstall the heavy torch build that already lives in the target venv.
+    "prompt_toolkit>=3.0",
+    "typer>=0.12",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.6", "mypy>=1.10"]
+
+[project.scripts]
+unsaid = "unsaid.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/unsaid"]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+markers = ["slow: model-backed tests that load gpt2 (require torch + transformers)"]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+files = ["src"]
+
+# torch/transformers are installed but enormous; following their imports makes
+# mypy hang. Skip walking them (we treat them as untyped boundaries anyway).
+[[tool.mypy.overrides]]
+module = ["torch.*", "transformers.*"]
+follow_imports = "skip"
+follow_imports_for_stubs = true
