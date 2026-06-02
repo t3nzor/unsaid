@@ -59,11 +59,16 @@ Lint / typecheck / test:
 ## Conventions
 - **Token healing is the default.** Typing mid-word (`Hel`) shows real word
   completions (`Hello`, `Help`) instead of raw next tokens. `HFEngine.complete`
-  conditions on the text *before* the partial word, filters the vocabulary to
-  tokens continuing what's typed, and returns the **remainder** (so `Candidate.
-  text` is just the part still to type; the format/accept layers prepend the
-  typed prefix). Healed probabilities are renormalized over the matching set.
-  `--no-heal` / `heal=False` restores the raw next-token distribution.
+  conditions on the text *before* the trailing fragment, filters the vocabulary
+  to tokens continuing what's typed, and returns the **remainder** (so
+  `Candidate.text` is just the part still to type; the format/accept layers
+  prepend the typed prefix). Healed probabilities are renormalized over the
+  matching set. `--no-heal` / `heal=False` restores the raw next-token
+  distribution.
+  - The same machinery heals a **trailing space** (`Hello `): GPT-2 tokenizes a
+    dangling space as its own token and predicts garbage (`_`, `!!!`) after it,
+    so a word boundary is healed by conditioning on the preceding word and
+    matching leading-space (new-word) tokens.
   - Raw next tokens are subword fragments and mid-word look broken because of
     BPE (`Hel` is one token; `Hello` is a different single token, so the model
     rarely emits `lo` after `Hel`). That's expected, not a ranking bug.

@@ -84,8 +84,14 @@ def test_no_heal_falls_back_to_raw(engine):
         engine.heal = True
 
 
-def test_complete_between_words_uses_raw(engine):
-    # Trailing space => no partial word => raw distribution.
-    cands = engine.complete("The quick brown ", 5)
-    assert len(cands) == 5
+def test_trailing_space_heals_to_new_words(engine):
+    # A trailing space is a word boundary: completions should be whole new
+    # words (leading-space tokens), not garbage from the dangling space token.
+    cands = engine.complete("The quick brown fox ", 10)
+    assert len(cands) == 10
+    words = [c.text for c in cands]
+    # Healed remainders have the leading space stripped and are real words.
+    assert any(w.strip().isalpha() for w in words)
+    # No empty/blank candidates (the bare-space token is filtered out).
+    assert all(c.text for c in cands)
 

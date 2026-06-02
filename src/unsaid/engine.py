@@ -180,15 +180,19 @@ class HFEngine(CompletionEngine):
             return self.topk(self.encode(text), k)
 
         partial = current_word_prefix(text)
-        if not partial:
-            # Cursor is between words: the raw distribution is well-behaved.
-            return self.topk(self.encode(text), k)
-
         before = text[: len(text) - len(partial)]
         stripped = before.rstrip(" ")
-        # If a space separated the previous word, GPT-2 attaches it to the next
-        # token, so the healed token we look for begins with that space.
-        search = (" " if len(stripped) < len(before) else "") + partial
+        had_space = len(stripped) < len(before)
+        # GPT-2 attaches a leading space to the *following* word token, so a
+        # trailing space tokenizes as a dangling space token and the model
+        # predicts garbage after it. Heal it: condition on the text before the
+        # space and look for tokens that begin with the space (i.e. new words).
+        # The same machinery handles a partial word (`Hel`) and a word boundary
+        # (`Hello `) — in both cases we re-predict the trailing fragment.
+        search = (" " if had_space else "") + partial
+        if not search:
+            # Nothing to heal (empty buffer, or trailing newline/tab).
+            return self.topk(self.encode(text), k)
 
         probs = self._next_token_probs(self.encode(stripped))
         if probs is None:
@@ -208,7 +212,15 @@ class HFEngine(CompletionEngine):
         total = sum(p for _, p in matched) or 1.0
         matched.sort(key=lambda x: x[1], reverse=True)
         cut = len(search)
-        return [
-            Candidate(token_id=tid, text=self._vocab()[tid][cut:], prob=p / total)
-            for tid, p in matched[:k]
-        ]
+        out: list[Candidate] = []
+        for tid, p in matched:
+            remainder = self._vocab()[tid][cut:]
+            # Skip candidates that would render as nothing (e.g. a bare extra
+            # space token at a word boundary, where there is no typed prefix).
+            if not partial and not remainder:
+                continue
+            out.append(Candidate(token_id=tid, text=remainder, prob=p / total))
+            if len(out) >= k:
+                break
+        return out or self.topk(self.encode(text), k)
+
