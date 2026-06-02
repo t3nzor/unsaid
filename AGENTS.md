@@ -69,5 +69,11 @@ Lint / typecheck / test:
     rarely emits `lo` after `Hel`). That's expected, not a ranking bug.
 - TUI keys: `Tab` accepts top-1; `Alt+1..9`/`Alt+0` accept the Nth candidate.
   Plain digits are reserved for typing into the buffer, so accept is on Alt.
+  `PageDown`/`PageUp` scroll through pages of lower/higher-ranked completions.
+- Paging lives in `Session`: it fetches a pool of `top_k * max_pages` candidates
+  per keystroke and slices one page at a time; the model runs once per text
+  change, not per page. Editing or accepting resets to page 0. Accept indices
+  are relative to the *current page*. (Token healing often yields a tiny pool,
+  so paging mainly matters between words / with `--no-heal`.)
 - Tests that need a model are marked `slow`; pure logic tests use a `FakeEngine`
   / no torch and must stay fast.

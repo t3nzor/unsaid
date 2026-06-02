@@ -2,7 +2,8 @@
 
 Layout: an editable input buffer on top, a live top-k panel below. The
 distribution recomputes (debounced) as you type. Tab accepts the top
-candidate; number keys 1-9 and 0 accept the Nth listed candidate.
+candidate; Alt+1..9/Alt+0 accept the Nth listed candidate. PageDown/PageUp
+scroll through the next/previous page of lower-ranked completions.
 """
 
 from __future__ import annotations
@@ -26,6 +27,7 @@ _STYLE = Style.from_dict(
         "prefix": "#888888",  # already-typed word context: dimmed
         "token": "bold #00afff",  # the predicted next token: highlighted
         "bar": "#5f8700",
+        "header": "#888888",
     }
 )
 
@@ -61,7 +63,10 @@ class UnsaidApp:
         if not cands:
             return [("", "(type to begin)")]
         prefix = current_word_prefix(self.session.text)
-        return format_candidates_fragments(cands, prefix)
+        start = self.session.page * self.session.top_k + 1
+        end = start + len(cands) - 1
+        header = f"ranks {start}-{end} of {len(self.session.pool)}  ·  PgUp/PgDn\n"
+        return [("class:header", header), *format_candidates_fragments(cands, prefix)]
 
     def _on_text_changed(self, _buf: Buffer) -> None:
         if self._timer is not None:
@@ -94,6 +99,14 @@ class UnsaidApp:
         @kb.add("tab")
         def _accept_top(event) -> None:
             self._accept_and_sync(0)
+
+        @kb.add("pagedown")
+        def _next_page(event) -> None:
+            self.session.next_page()
+
+        @kb.add("pageup")
+        def _prev_page(event) -> None:
+            self.session.prev_page()
 
         # Alt+digit accepts the Nth candidate without stealing plain digit
         # typing from the input buffer. 1..9 -> index 0..8, 0 -> index 9.
