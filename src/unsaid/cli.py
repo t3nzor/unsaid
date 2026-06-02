@@ -18,6 +18,12 @@ def main(
     threads: int = typer.Option(
         0, "--threads", help="CPU threads for torch (0 = library default)."
     ),
+    heal: bool = typer.Option(
+        True,
+        "--heal/--no-heal",
+        help="Token healing: complete the partial word you're typing "
+        "(--no-heal shows raw next tokens).",
+    ),
     prompt: str = typer.Option(
         "", "--prompt", "-p", help="Non-interactive: print top-k for this text and exit."
     ),
@@ -30,6 +36,7 @@ def main(
         model,
         temperature=temperature,
         num_threads=threads or None,
+        heal=heal,
     )
     session = Session(engine, top_k=top_k)
 

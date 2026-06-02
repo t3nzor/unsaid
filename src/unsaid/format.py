@@ -25,9 +25,18 @@ stands out.
 
 from __future__ import annotations
 
-import re
+from .engine import Candidate, current_word_prefix
 
-from .engine import Candidate
+__all__ = [
+    "current_word_prefix",
+    "visible_token",
+    "candidate_word",
+    "prob_bar",
+    "format_candidate",
+    "format_candidates",
+    "format_candidates_fragments",
+    "StyledFragments",
+]
 
 _LEADING_SPACE = "·"
 _NEWLINE = "⏎"
@@ -37,18 +46,6 @@ _BAR_FULL = "█"
 _BAR_PARTIALS = " ▏▎▍▌▋▊▉"  # 1/8th increments
 
 _WORD_COL = 18  # min width of the word column, for bar alignment
-
-_TRAILING_WORD = re.compile(r"\S+$")
-
-
-def current_word_prefix(text: str) -> str:
-    """Return the partial word the user is currently typing.
-
-    This is the trailing run of non-whitespace characters. Empty if the buffer
-    is empty or ends in whitespace (i.e. the next token starts a new word).
-    """
-    match = _TRAILING_WORD.search(text)
-    return match.group(0) if match else ""
 
 
 def visible_token(text: str) -> str:
@@ -60,8 +57,13 @@ def visible_token(text: str) -> str:
 
 
 def _continues_word(text: str) -> bool:
-    """True if ``text`` extends the current word rather than starting a new one."""
-    return bool(text) and not text[0].isspace()
+    """True if ``text`` extends the current word rather than starting a new one.
+
+    A new word starts only when the token begins with whitespace. An empty
+    remainder (the typed word is itself a complete token) counts as continuing,
+    so the prefix is still shown.
+    """
+    return not text[:1].isspace()
 
 
 def candidate_word(cand: Candidate, prefix: str = "") -> str:

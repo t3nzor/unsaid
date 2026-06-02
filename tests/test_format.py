@@ -68,6 +68,11 @@ def test_candidate_word_no_prefix_passthrough():
     assert candidate_word(Candidate(1, "ie", 0.1)) == "ie"
 
 
+def test_candidate_word_empty_remainder_shows_prefix():
+    # Healed candidate where the typed word is itself a complete token.
+    assert candidate_word(Candidate(1, "", 0.1), "Hel") == "Hel"
+
+
 def test_format_candidate_shows_full_word():
     row = format_candidate(1, Candidate(1, "ie", 0.1921), "brown")
     assert row.startswith("1  brownie")

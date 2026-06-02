@@ -57,8 +57,16 @@ Lint / typecheck / test:
 - `cli.py` — typer entrypoint.
 
 ## Conventions
-- Completions are **raw next tokens** (often subword fragments), not whole
-  words — that's intentional ("implicit lexical knowledge").
+- **Token healing is the default.** Typing mid-word (`Hel`) shows real word
+  completions (`Hello`, `Help`) instead of raw next tokens. `HFEngine.complete`
+  conditions on the text *before* the partial word, filters the vocabulary to
+  tokens continuing what's typed, and returns the **remainder** (so `Candidate.
+  text` is just the part still to type; the format/accept layers prepend the
+  typed prefix). Healed probabilities are renormalized over the matching set.
+  `--no-heal` / `heal=False` restores the raw next-token distribution.
+  - Raw next tokens are subword fragments and mid-word look broken because of
+    BPE (`Hel` is one token; `Hello` is a different single token, so the model
+    rarely emits `lo` after `Hel`). That's expected, not a ranking bug.
 - TUI keys: `Tab` accepts top-1; `Alt+1..9`/`Alt+0` accept the Nth candidate.
   Plain digits are reserved for typing into the buffer, so accept is on Alt.
 - Tests that need a model are marked `slow`; pure logic tests use a `FakeEngine`

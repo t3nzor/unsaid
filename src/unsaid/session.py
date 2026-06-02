@@ -23,8 +23,7 @@ class Session:
         return self.recompute()
 
     def recompute(self) -> list[Candidate]:
-        token_ids = self.engine.encode(self.text)
-        self.candidates = self.engine.topk(token_ids, self.top_k)
+        self.candidates = self.engine.complete(self.text, self.top_k)
         return self.candidates
 
     def accept(self, index: int) -> str:

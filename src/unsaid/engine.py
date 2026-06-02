@@ -1,8 +1,21 @@
 """Next-token completion engine.
 
 Provides a backend-agnostic ``CompletionEngine`` interface and a Hugging Face
-``transformers`` implementation that returns the exact top-k next-token
-distribution from a causal language model.
+``transformers`` implementation.
+
+Two completion modes
+---------------------
+* **Raw next token** (``topk``): the exact distribution over the model's next
+  token given the tokenized text. Faithful, but mid-word it exposes a BPE
+  artifact: typing ``Hel`` is the single token ``Hel``, and the model almost
+  never emits ``lo`` after it (it learned the single token ``Hello``), so
+  "Hello"/"Help" don't appear.
+* **Token healing** (``complete``, the default): when the cursor sits mid-word,
+  condition on the text *before* the partial word and rank the vocabulary
+  tokens whose text continues what's been typed. This surfaces the words you'd
+  expect (``Hel`` -> ``Hello``, ``Help``, ...). Each candidate's ``text`` is the
+  *remainder* still to be typed, so the UI/accept logic (which prepends the
+  already-typed prefix) works unchanged.
 
 This project runs CPU-only on purpose (see AGENTS.md): the available GPU is an
 RTX 5070 (sm_120) which the installed torch build cannot drive. We never touch
@@ -11,20 +24,35 @@ CUDA here.
 
 from __future__ import annotations
 
+import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+
+_TRAILING_WORD = re.compile(r"\S+$")
+
+
+def current_word_prefix(text: str) -> str:
+    """Return the partial word at the end of ``text``.
+
+    This is the trailing run of non-whitespace characters; empty if ``text`` is
+    empty or ends in whitespace (i.e. the next token would start a new word).
+    """
+    match = _TRAILING_WORD.search(text)
+    return match.group(0) if match else ""
 
 
 @dataclass(frozen=True)
 class Candidate:
-    """A single next-token candidate.
+    """A single completion candidate.
 
     Attributes:
         token_id: The vocabulary id of the token.
-        text: The decoded text of *this token alone* (may be a subword
-            fragment and may include a leading space).
-        prob: Probability mass assigned to this token after temperature
-            scaling, in ``[0, 1]``.
+        text: The text this candidate contributes *beyond what is already
+            typed*. In raw mode this is the whole next token; in healed mode it
+            is the remainder that completes the current word. May be a subword
+            fragment and may include a leading space.
+        prob: Probability assigned to this candidate in ``[0, 1]``. In healed
+            mode it is renormalized over the matching completions.
     """
 
     token_id: int
@@ -33,7 +61,7 @@ class Candidate:
 
 
 class CompletionEngine(ABC):
-    """Backend-agnostic source of next-token distributions."""
+    """Backend-agnostic source of next-token / completion distributions."""
 
     @abstractmethod
     def encode(self, text: str) -> list[int]:
@@ -45,11 +73,19 @@ class CompletionEngine(ABC):
 
     @abstractmethod
     def topk(self, token_ids: list[int], k: int) -> list[Candidate]:
-        """Return the ``k`` most likely next tokens given ``token_ids``.
+        """Return the ``k`` most likely raw next tokens given ``token_ids``.
 
         Implementations must tolerate an empty ``token_ids`` list (predicting
         the very first token of a sequence).
         """
+
+    def complete(self, text: str, k: int) -> list[Candidate]:
+        """Return the ``k`` best completions for ``text``.
+
+        Default implementation is the raw next-token distribution. Backends
+        that support token healing override this.
+        """
+        return self.topk(self.encode(text), k)
 
 
 class HFEngine(CompletionEngine):
@@ -61,6 +97,7 @@ class HFEngine(CompletionEngine):
         *,
         temperature: float = 1.0,
         num_threads: int | None = None,
+        heal: bool = True,
     ) -> None:
         if temperature <= 0:
             raise ValueError("temperature must be > 0")
@@ -76,11 +113,15 @@ class HFEngine(CompletionEngine):
         self._torch = torch
         self.model_name = model_name
         self.temperature = temperature
+        self.heal = heal
 
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
         self.model = AutoModelForCausalLM.from_pretrained(model_name)
         self.model.to("cpu")
         self.model.eval()
+
+        # Lazily built map of token id -> decoded text, used for healing.
+        self._vocab_strings: list[str] | None = None
 
     def encode(self, text: str) -> list[int]:
         if text == "":
@@ -90,32 +131,31 @@ class HFEngine(CompletionEngine):
     def decode(self, token_ids: list[int]) -> str:
         return self.tokenizer.decode(token_ids)
 
+    def _bos_ids(self) -> list[int]:
+        bos = self.tokenizer.bos_token_id
+        if bos is None:
+            bos = self.tokenizer.eos_token_id
+        return [bos] if bos is not None else []
+
+    def _next_token_probs(self, token_ids: list[int]):
+        """Softmax over the vocabulary for the position after ``token_ids``."""
+        torch = self._torch
+        ids = token_ids or self._bos_ids()
+        if not ids:
+            return None
+        input_ids = torch.tensor([ids], dtype=torch.long)
+        with torch.inference_mode():
+            logits = self.model(input_ids).logits[0, -1]
+        return torch.softmax(logits / self.temperature, dim=-1)
+
     def topk(self, token_ids: list[int], k: int) -> list[Candidate]:
         if k <= 0:
             raise ValueError("k must be > 0")
-        torch = self._torch
-
-        if not token_ids:
-            # No context: prime with the model's BOS/EOS so we still get a
-            # well-defined first-token distribution where one exists.
-            bos = self.tokenizer.bos_token_id
-            if bos is None:
-                bos = self.tokenizer.eos_token_id
-            ids = [bos] if bos is not None else []
-            if not ids:
-                return []
-            input_ids = torch.tensor([ids], dtype=torch.long)
-        else:
-            input_ids = torch.tensor([token_ids], dtype=torch.long)
-
-        with torch.inference_mode():
-            logits = self.model(input_ids).logits[0, -1]
-
-        logits = logits / self.temperature
-        probs = torch.softmax(logits, dim=-1)
+        probs = self._next_token_probs(token_ids)
+        if probs is None:
+            return []
         k = min(k, probs.shape[-1])
-        top_probs, top_ids = torch.topk(probs, k)
-
+        top_probs, top_ids = self._torch.topk(probs, k)
         out: list[Candidate] = []
         for prob, tid in zip(top_probs.tolist(), top_ids.tolist(), strict=True):
             out.append(
@@ -126,3 +166,49 @@ class HFEngine(CompletionEngine):
                 )
             )
         return out
+
+    def _vocab(self) -> list[str]:
+        if self._vocab_strings is None:
+            n = len(self.tokenizer)
+            self._vocab_strings = self.tokenizer.batch_decode([[i] for i in range(n)])
+        return self._vocab_strings
+
+    def complete(self, text: str, k: int) -> list[Candidate]:
+        if k <= 0:
+            raise ValueError("k must be > 0")
+        if not self.heal:
+            return self.topk(self.encode(text), k)
+
+        partial = current_word_prefix(text)
+        if not partial:
+            # Cursor is between words: the raw distribution is well-behaved.
+            return self.topk(self.encode(text), k)
+
+        before = text[: len(text) - len(partial)]
+        stripped = before.rstrip(" ")
+        # If a space separated the previous word, GPT-2 attaches it to the next
+        # token, so the healed token we look for begins with that space.
+        search = (" " if len(stripped) < len(before) else "") + partial
+
+        probs = self._next_token_probs(self.encode(stripped))
+        if probs is None:
+            return self.topk(self.encode(text), k)
+
+        prob_list = probs.tolist()
+        matched = [
+            (tid, p)
+            for tid, (s, p) in enumerate(zip(self._vocab(), prob_list, strict=True))
+            if s.startswith(search)
+        ]
+        if not matched:
+            # The boundary has no clean single-token completion; fall back so
+            # the panel is never empty.
+            return self.topk(self.encode(text), k)
+
+        total = sum(p for _, p in matched) or 1.0
+        matched.sort(key=lambda x: x[1], reverse=True)
+        cut = len(search)
+        return [
+            Candidate(token_id=tid, text=self._vocab()[tid][cut:], prob=p / total)
+            for tid, p in matched[:k]
+        ]
