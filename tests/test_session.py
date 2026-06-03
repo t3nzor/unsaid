@@ -21,6 +21,9 @@ class FakeEngine(CompletionEngine):
             Candidate(ord(letters[i % 10]), f" {letters[i % 10]}", 1.0 / (i + 1)) for i in range(k)
         ]
 
+    def surprisal(self, text: str) -> float:
+        return float(len(text))  # deterministic stand-in for wiring tests
+
 
 def test_set_text_recomputes():
     s = Session(FakeEngine(), top_k=5)
@@ -104,4 +107,11 @@ def test_accept_resets_to_first_page():
     s.next_page()
     s.accept(0)
     assert s.page == 0
+
+
+def test_session_stores_surprisal_and_token_count():
+    s = Session(FakeEngine(), top_k=3)
+    s.set_text("hello")
+    assert s.surprisal == 5.0  # FakeEngine returns len(text)
+    assert s.n_tokens == 5  # FakeEngine encodes one id per char
 

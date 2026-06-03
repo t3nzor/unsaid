@@ -19,7 +19,12 @@ from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
 from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.styles import Style
 
-from .format import StyledFragments, current_word_prefix, format_candidates_fragments
+from .format import (
+    StyledFragments,
+    current_word_prefix,
+    format_candidates_fragments,
+    format_surprisal,
+)
 from .session import Session
 
 _STYLE = Style.from_dict(
@@ -28,6 +33,7 @@ _STYLE = Style.from_dict(
         "token": "bold #00afff",  # the predicted next token: highlighted
         "bar": "#5f8700",
         "header": "#888888",
+        "surprisal": "#d78700",
     }
 )
 
@@ -59,14 +65,19 @@ class UnsaidApp:
         )
 
     def _get_panel_fragments(self) -> StyledFragments:
+        surprisal = format_surprisal(self.session.surprisal, self.session.n_tokens)
         cands = self.session.candidates
         if not cands:
-            return [("", "(type to begin)")]
+            return [("class:surprisal", surprisal + "\n"), ("", "(type to begin)")]
         prefix = current_word_prefix(self.session.text)
         start = self.session.page * self.session.top_k + 1
         end = start + len(cands) - 1
         header = f"ranks {start}-{end} of {len(self.session.pool)}  ·  PgUp/PgDn\n"
-        return [("class:header", header), *format_candidates_fragments(cands, prefix)]
+        return [
+            ("class:surprisal", surprisal + "\n"),
+            ("class:header", header),
+            *format_candidates_fragments(cands, prefix),
+        ]
 
     def _on_text_changed(self, _buf: Buffer) -> None:
         if self._timer is not None:

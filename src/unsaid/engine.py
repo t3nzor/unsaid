@@ -24,6 +24,7 @@ CUDA here.
 
 from __future__ import annotations
 
+import math
 import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -86,6 +87,13 @@ class CompletionEngine(ABC):
         that support token healing override this.
         """
         return self.topk(self.encode(text), k)
+
+    def surprisal(self, text: str) -> float:
+        """Total surprisal of ``text`` in bits (``-sum log2 P(token|context)``).
+
+        Default is ``0.0``; model backends override it.
+        """
+        return 0.0
 
 
 class HFEngine(CompletionEngine):
@@ -223,4 +231,35 @@ class HFEngine(CompletionEngine):
             if len(out) >= k:
                 break
         return out or self.topk(self.encode(text), k)
+
+    def surprisal(self, text: str) -> float:
+        """Total surprisal of ``text`` in bits under the model's *true*
+        distribution (temperature is not applied here).
+
+        Each token is scored given its predecessors; the first token is scored
+        against BOS when the tokenizer provides one. Returns ``0.0`` for text
+        with no scoreable tokens.
+        """
+        torch = self._torch
+        ids = self.encode(text)
+        if not ids:
+            return 0.0
+
+        bos = self._bos_ids()
+        seq = bos + ids
+        first = len(bos) if bos else 1  # index of the first token we can score
+        if first >= len(seq):
+            return 0.0  # single token and no BOS context to score it against
+
+        input_ids = torch.tensor([seq], dtype=torch.long)
+        with torch.inference_mode():
+            logits = self.model(input_ids).logits[0]  # [len(seq), vocab]
+        log_probs = torch.log_softmax(logits, dim=-1)
+
+        targets = torch.tensor(seq[first:], dtype=torch.long)
+        # Token seq[j] is predicted by the logits at position j-1.
+        predictors = log_probs[first - 1 : len(seq) - 1]
+        token_logp = predictors.gather(1, targets.unsqueeze(1)).squeeze(1)
+        nats = -float(token_logp.sum())
+        return nats / math.log(2)
 

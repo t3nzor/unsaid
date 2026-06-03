@@ -95,3 +95,25 @@ def test_trailing_space_heals_to_new_words(engine):
     # No empty/blank candidates (the bare-space token is filtered out).
     assert all(c.text for c in cands)
 
+
+def test_surprisal_empty_is_zero(engine):
+    assert engine.surprisal("") == 0.0
+
+
+def test_surprisal_nonnegative_and_monotonic(engine):
+    # Each additional token adds non-negative surprisal, so a longer prefix of
+    # the same string has total surprisal >= the shorter one.
+    short = engine.surprisal("The cat")
+    long = engine.surprisal("The cat sat on the mat")
+    assert short >= 0.0
+    assert long >= short
+
+
+def test_surprisal_higher_for_unpredictable_text(engine):
+    def per_token(t):
+        return engine.surprisal(t) / max(1, len(engine.encode(t)))
+
+    predictable = per_token("The United States of America")
+    gibberish = per_token("The qwx zzfp blorgon")
+    assert gibberish > predictable
+

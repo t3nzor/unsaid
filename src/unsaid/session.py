@@ -26,6 +26,8 @@ class Session:
         self.pool: list[Candidate] = []
         self.page: int = 0
         self.candidates: list[Candidate] = []
+        self.surprisal: float = 0.0  # total bits of the running string
+        self.n_tokens: int = 0
 
     def set_text(self, text: str) -> list[Candidate]:
         """Replace the buffer text, reset to the first page, and recompute."""
@@ -35,6 +37,8 @@ class Session:
 
     def recompute(self) -> list[Candidate]:
         self.pool = self.engine.complete(self.text, self.top_k * self.max_pages)
+        self.surprisal = self.engine.surprisal(self.text)
+        self.n_tokens = len(self.engine.encode(self.text))
         self._update_page()
         return self.candidates
 

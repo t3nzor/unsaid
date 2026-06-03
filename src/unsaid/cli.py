@@ -41,10 +41,11 @@ def main(
     session = Session(engine, top_k=top_k)
 
     if prompt:
-        from .format import current_word_prefix, format_candidates
+        from .format import current_word_prefix, format_candidates, format_surprisal
 
         cands = session.set_text(prompt)
         typer.echo(f"prefix: {prompt!r}")
+        typer.echo(format_surprisal(session.surprisal, session.n_tokens))
         typer.echo(format_candidates(cands, current_word_prefix(prompt)))
         raise typer.Exit()
 

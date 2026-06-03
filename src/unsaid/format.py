@@ -35,6 +35,7 @@ __all__ = [
     "format_candidate",
     "format_candidates",
     "format_candidates_fragments",
+    "format_surprisal",
     "StyledFragments",
 ]
 
@@ -99,6 +100,13 @@ def format_candidates(cands: list[Candidate], prefix: str = "", *, bar_width: in
     return "\n".join(
         format_candidate(i, c, prefix, bar_width=bar_width) for i, c in enumerate(cands, start=1)
     )
+
+
+def format_surprisal(bits: float, n_tokens: int) -> str:
+    """One-line summary of the running string's surprisal."""
+    if n_tokens <= 0:
+        return "surprisal: 0.00 bits"
+    return f"surprisal: {bits:.2f} bits  ({bits / n_tokens:.2f}/token, {n_tokens} tok)"
 
 
 # Styles used by the fragment (TUI) renderer below.

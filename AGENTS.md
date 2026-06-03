@@ -49,7 +49,8 @@ Lint / typecheck / test:
 - `engine.py` — `CompletionEngine` ABC + `HFEngine`. Forward pass → last-pos
   logits → temperature → softmax → `topk` → decode each token id individually.
   torch/transformers are imported lazily inside methods so `--help` and the
-  pure-module tests stay fast.
+  pure-module tests stay fast. `surprisal(text)` scores the whole string
+  (`-sum log2 P(token|context)`, BOS-primed, in **bits**, at temperature 1).
 - `session.py` — buffer text + recompute + accept-candidate logic. No UI/torch.
 - `format.py` — pure rendering. Tokens are already decoded, so whitespace is
   made visible: leading space → `·`, newline → `⏎`, tab → `⇥`.

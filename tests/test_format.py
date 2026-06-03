@@ -6,6 +6,7 @@ from unsaid.format import (
     current_word_prefix,
     format_candidate,
     format_candidates_fragments,
+    format_surprisal,
     prob_bar,
     visible_token,
 )
@@ -83,4 +84,15 @@ def test_fragments_dim_prefix_highlight_token():
     styles = {style: text for style, text in frags if style}
     assert styles.get("class:prefix") == "brown"
     assert styles.get("class:token") == "ie"
+
+
+def test_format_surprisal_empty():
+    assert format_surprisal(0.0, 0) == "surprisal: 0.00 bits"
+
+
+def test_format_surprisal_includes_per_token():
+    out = format_surprisal(20.0, 5)
+    assert "20.00 bits" in out
+    assert "4.00/token" in out
+    assert "5 tok" in out
 
