@@ -18,6 +18,11 @@ def main(
     threads: int = typer.Option(
         0, "--threads", help="CPU threads for torch (0 = library default)."
     ),
+    device: str = typer.Option(
+        "auto",
+        "--device",
+        help="Torch device: auto picks the CUDA GPU with the most VRAM, else CPU.",
+    ),
     heal: bool = typer.Option(
         True,
         "--heal/--no-heal",
@@ -37,6 +42,7 @@ def main(
         temperature=temperature,
         num_threads=threads or None,
         heal=heal,
+        device=device,
     )
     session = Session(engine, top_k=top_k)
 

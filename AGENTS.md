@@ -6,38 +6,31 @@ LLM's top-k next-token distribution live as you type. Python project.
 ## Environment (READ FIRST — non-obvious)
 Use this interpreter for everything; do NOT use system `python`:
 
-    /home/t3nzor/venv3.11/bin/python   # Python 3.11.13, torch 2.7.0+cu126, transformers 4.51.3
+    /home/t3nzor/venv/bin/python   # Python 3.14.5, torch 2.12.0, transformers 5.10.2
 
-- **CPU-only by design.** The machine's GPU is an RTX 5070 (`sm_120`/Blackwell).
-  The installed torch (`2.7.0+cu126`) ships kernels only up to `sm_90`, so
-  `torch.cuda.is_available()` returns `True` but any real CUDA op fails with
-  `no kernel image is available for execution on the device`. `HFEngine` pins
-  CPU; never add `.cuda()`/device=auto paths unless torch is upgraded to a
-  cu128 build with `sm_120` support.
-- **numpy must be `<2`.** torch 2.7.0 was built against the numpy 1.x ABI;
-  numpy 2.x triggers `numpy.dtype size changed` import errors in transformers.
-  Pinned to `1.26.4`. (A shared, unrelated `opencv-python` in this venv wants
-  numpy>=2 — ignore that resolver warning.)
-- The other venvs are dead ends: `/home/t3nzor/venv` and the system python are
-  Python 3.14, which has no torch wheels.
+- **GPU by default.** The machine has multiple NVIDIA GPUs. `HFEngine` defaults
+  to `device="auto"`, which chooses the CUDA device with the most VRAM (currently
+  the RTX 5060 Ti at `cuda:1`) and falls back to CPU if CUDA is unavailable.
+- Use `--device cpu`, `--device cuda:0`, or `--device cuda:1` to override the
+  automatic choice.
 
 ## Commands
 Install (deps already in the venv; this adds the project + dev tools):
 
-    /home/t3nzor/venv3.11/bin/python -m pip install -e ".[dev]"
+    /home/t3nzor/venv/bin/python -m pip install -e ".[dev]"
 
 Run:
 
-    /home/t3nzor/venv3.11/bin/python -m unsaid.cli                 # live TUI
-    /home/t3nzor/venv3.11/bin/python -m unsaid.cli -p "The quick brown"   # non-interactive top-k
+    /home/t3nzor/venv/bin/python -m unsaid.cli                 # live TUI
+    /home/t3nzor/venv/bin/python -m unsaid.cli -p "The quick brown"   # non-interactive top-k
 
 Lint / typecheck / test:
 
-    /home/t3nzor/venv3.11/bin/python -m ruff check .
-    /home/t3nzor/venv3.11/bin/python -m mypy src
-    /home/t3nzor/venv3.11/bin/python -m pytest -m "not slow"   # fast, no model
-    /home/t3nzor/venv3.11/bin/python -m pytest -m slow         # loads gpt2 (~7s)
-    /home/t3nzor/venv3.11/bin/python -m pytest tests/test_session.py::test_accept_top_is_index_zero   # single test
+    /home/t3nzor/venv/bin/python -m ruff check .
+    /home/t3nzor/venv/bin/python -m mypy src
+    /home/t3nzor/venv/bin/python -m pytest -m "not slow"   # fast, no model
+    /home/t3nzor/venv/bin/python -m pytest -m slow         # loads gpt2 (~7s)
+    /home/t3nzor/venv/bin/python -m pytest tests/test_session.py::test_accept_top_is_index_zero   # single test
 
 - **mypy** would hang walking the installed torch/transformers trees; it's
   configured with `follow_imports = skip` for those modules. Keep that.

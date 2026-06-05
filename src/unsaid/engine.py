@@ -17,9 +17,8 @@ Two completion modes
   *remainder* still to be typed, so the UI/accept logic (which prepends the
   already-typed prefix) works unchanged.
 
-This project runs CPU-only on purpose (see AGENTS.md): the available GPU is an
-RTX 5070 (sm_120) which the installed torch build cannot drive. We never touch
-CUDA here.
+The Hugging Face backend can run on CPU or CUDA. ``device="auto"`` picks the
+CUDA device with the most VRAM when CUDA is available, otherwise CPU.
 """
 
 from __future__ import annotations
@@ -97,7 +96,7 @@ class CompletionEngine(ABC):
 
 
 class HFEngine(CompletionEngine):
-    """A Hugging Face causal-LM backed engine, pinned to CPU."""
+    """A Hugging Face causal-LM backed engine."""
 
     def __init__(
         self,
@@ -106,6 +105,7 @@ class HFEngine(CompletionEngine):
         temperature: float = 1.0,
         num_threads: int | None = None,
         heal: bool = True,
+        device: str = "auto",
     ) -> None:
         if temperature <= 0:
             raise ValueError("temperature must be > 0")
@@ -122,10 +122,11 @@ class HFEngine(CompletionEngine):
         self.model_name = model_name
         self.temperature = temperature
         self.heal = heal
+        self.device = self._resolve_device(device)
 
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
         self.model = AutoModelForCausalLM.from_pretrained(model_name)
-        self.model.to("cpu")
+        self.model.to(self.device)
         self.model.eval()
 
         # Lazily built map of token id -> decoded text, used for healing.
@@ -139,6 +140,37 @@ class HFEngine(CompletionEngine):
     def decode(self, token_ids: list[int]) -> str:
         return self.tokenizer.decode(token_ids)
 
+    def _resolve_device(self, device: str):
+        torch = self._torch
+        requested = device.strip().lower()
+        if not requested:
+            raise ValueError("device must not be empty")
+
+        if requested == "auto":
+            if torch.cuda.is_available() and torch.cuda.device_count() > 0:
+                best = max(
+                    range(torch.cuda.device_count()),
+                    key=lambda i: torch.cuda.get_device_properties(i).total_memory,
+                )
+                return torch.device(f"cuda:{best}")
+            return torch.device("cpu")
+
+        try:
+            resolved = torch.device(requested)
+        except RuntimeError as exc:
+            raise ValueError(f"invalid torch device: {device!r}") from exc
+
+        if resolved.type == "cuda":
+            if not torch.cuda.is_available():
+                raise ValueError("CUDA device requested, but CUDA is not available")
+            count = torch.cuda.device_count()
+            index = 0 if resolved.index is None else resolved.index
+            if index < 0 or index >= count:
+                raise ValueError(
+                    f"CUDA device index {index} out of range; {count} device(s) available"
+                )
+        return resolved
+
     def _bos_ids(self) -> list[int]:
         bos = self.tokenizer.bos_token_id
         if bos is None:
@@ -151,7 +183,7 @@ class HFEngine(CompletionEngine):
         ids = token_ids or self._bos_ids()
         if not ids:
             return None
-        input_ids = torch.tensor([ids], dtype=torch.long)
+        input_ids = torch.tensor([ids], dtype=torch.long, device=self.device)
         with torch.inference_mode():
             logits = self.model(input_ids).logits[0, -1]
         return torch.softmax(logits / self.temperature, dim=-1)
@@ -165,7 +197,9 @@ class HFEngine(CompletionEngine):
         k = min(k, probs.shape[-1])
         top_probs, top_ids = self._torch.topk(probs, k)
         out: list[Candidate] = []
-        for prob, tid in zip(top_probs.tolist(), top_ids.tolist(), strict=True):
+        for prob, tid in zip(
+            top_probs.cpu().tolist(), top_ids.cpu().tolist(), strict=True
+        ):
             out.append(
                 Candidate(
                     token_id=int(tid),
@@ -206,7 +240,7 @@ class HFEngine(CompletionEngine):
         if probs is None:
             return self.topk(self.encode(text), k)
 
-        prob_list = probs.tolist()
+        prob_list = probs.cpu().tolist()
         matched = [
             (tid, p)
             for tid, (s, p) in enumerate(zip(self._vocab(), prob_list, strict=True))
@@ -251,15 +285,14 @@ class HFEngine(CompletionEngine):
         if first >= len(seq):
             return 0.0  # single token and no BOS context to score it against
 
-        input_ids = torch.tensor([seq], dtype=torch.long)
+        input_ids = torch.tensor([seq], dtype=torch.long, device=self.device)
         with torch.inference_mode():
             logits = self.model(input_ids).logits[0]  # [len(seq), vocab]
         log_probs = torch.log_softmax(logits, dim=-1)
 
-        targets = torch.tensor(seq[first:], dtype=torch.long)
+        targets = torch.tensor(seq[first:], dtype=torch.long, device=self.device)
         # Token seq[j] is predicted by the logits at position j-1.
         predictors = log_probs[first - 1 : len(seq) - 1]
         token_logp = predictors.gather(1, targets.unsqueeze(1)).squeeze(1)
         nats = -float(token_logp.sum())
         return nats / math.log(2)
-
