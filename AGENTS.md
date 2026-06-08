@@ -13,16 +13,22 @@ Use this interpreter for everything; do NOT use system `python`:
   the RTX 5060 Ti at `cuda:1`) and falls back to CPU if CUDA is unavailable.
 - Use `--device cpu`, `--device cuda:0`, or `--device cuda:1` to override the
   automatic choice.
+- `--dtype auto` is the default: BF16 if CUDA supports it, otherwise FP16 on
+  CUDA, and FP32 on CPU. Override with `--dtype float32`, `--dtype float16`, or
+  `--dtype bfloat16`.
+- 4-bit loading is opt-in via `--load-in-4bit`; it uses BitsAndBytes NF4 with
+  double quantization and requires the `quant` extra.
 
 ## Commands
-Install (deps already in the venv; this adds the project + dev tools):
+Install (deps already in the venv; this adds the project, dev tools, and 4-bit support):
 
-    /home/t3nzor/venv/bin/python -m pip install -e ".[dev]"
+    /home/t3nzor/venv/bin/python -m pip install -e ".[dev,quant]"
 
 Run:
 
     /home/t3nzor/venv/bin/python -m unsaid.cli                 # live TUI
     /home/t3nzor/venv/bin/python -m unsaid.cli -p "The quick brown"   # non-interactive top-k
+    /home/t3nzor/venv/bin/python -m unsaid.cli --load-in-4bit -p "The quick brown"
 
 Lint / typecheck / test:
 

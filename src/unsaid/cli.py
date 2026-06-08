@@ -23,6 +23,16 @@ def main(
         "--device",
         help="Torch device: auto picks the CUDA GPU with the most VRAM, else CPU.",
     ),
+    dtype: str = typer.Option(
+        "auto",
+        "--dtype",
+        help="Model dtype: auto uses BF16/FP16 on CUDA and FP32 on CPU.",
+    ),
+    load_in_4bit: bool = typer.Option(
+        False,
+        "--load-in-4bit/--no-load-in-4bit",
+        help="Load model with BitsAndBytes 4-bit NF4 quantization.",
+    ),
     heal: bool = typer.Option(
         True,
         "--heal/--no-heal",
@@ -43,6 +53,8 @@ def main(
         num_threads=threads or None,
         heal=heal,
         device=device,
+        dtype=dtype,
+        load_in_4bit=load_in_4bit,
     )
     session = Session(engine, top_k=top_k)
 

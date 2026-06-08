@@ -19,6 +19,8 @@ Two completion modes
 
 The Hugging Face backend can run on CPU or CUDA. ``device="auto"`` picks the
 CUDA device with the most VRAM when CUDA is available, otherwise CPU.
+``dtype="auto"`` uses BF16/FP16 on CUDA and FP32 on CPU. 4-bit loading uses
+BitsAndBytes NF4 quantization.
 """
 
 from __future__ import annotations
@@ -27,6 +29,7 @@ import math
 import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from importlib.util import find_spec
 
 _TRAILING_WORD = re.compile(r"\S+$")
 
@@ -106,6 +109,8 @@ class HFEngine(CompletionEngine):
         num_threads: int | None = None,
         heal: bool = True,
         device: str = "auto",
+        dtype: str = "auto",
+        load_in_4bit: bool = False,
     ) -> None:
         if temperature <= 0:
             raise ValueError("temperature must be > 0")
@@ -123,10 +128,14 @@ class HFEngine(CompletionEngine):
         self.temperature = temperature
         self.heal = heal
         self.device = self._resolve_device(device)
+        self.dtype = self._resolve_dtype(dtype)
+        self.load_in_4bit = load_in_4bit
 
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        self.model = AutoModelForCausalLM.from_pretrained(model_name)
-        self.model.to(self.device)
+        model_kwargs = self._model_kwargs()
+        self.model = AutoModelForCausalLM.from_pretrained(model_name, **model_kwargs)
+        if not self.load_in_4bit:
+            self.model.to(self.device)
         self.model.eval()
 
         # Lazily built map of token id -> decoded text, used for healing.
@@ -169,7 +178,73 @@ class HFEngine(CompletionEngine):
                 raise ValueError(
                     f"CUDA device index {index} out of range; {count} device(s) available"
                 )
+            if resolved.index is None:
+                return torch.device("cuda:0")
         return resolved
+
+    def _resolve_dtype(self, dtype: str):
+        torch = self._torch
+        requested = dtype.strip().lower()
+        if not requested:
+            raise ValueError("dtype must not be empty")
+
+        if requested == "auto":
+            if self.device.type == "cuda":
+                if torch.cuda.is_bf16_supported():
+                    return torch.bfloat16
+                return torch.float16
+            return torch.float32
+
+        aliases = {
+            "float32": torch.float32,
+            "fp32": torch.float32,
+            "float": torch.float32,
+            "float16": torch.float16,
+            "fp16": torch.float16,
+            "half": torch.float16,
+            "bfloat16": torch.bfloat16,
+            "bf16": torch.bfloat16,
+        }
+        try:
+            return aliases[requested]
+        except KeyError as exc:
+            choices = "auto, float32, float16, bfloat16"
+            raise ValueError(
+                f"invalid dtype: {dtype!r}; expected one of: {choices}"
+            ) from exc
+
+    def _model_kwargs(self) -> dict[str, object]:
+        if self.load_in_4bit:
+            if self.device.type != "cuda":
+                raise ValueError("4-bit loading requires a CUDA device")
+            missing = [
+                pkg for pkg in ("accelerate", "bitsandbytes") if find_spec(pkg) is None
+            ]
+            if missing:
+                names = ", ".join(missing)
+                raise ValueError(
+                    f"4-bit loading requires {names}; install with the quant extra"
+                )
+
+            try:
+                from transformers import BitsAndBytesConfig
+            except ImportError as exc:
+                raise ValueError(
+                    "4-bit loading requires a transformers build with BitsAndBytesConfig"
+                ) from exc
+
+            quantization_config = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_quant_type="nf4",
+                bnb_4bit_use_double_quant=True,
+                bnb_4bit_compute_dtype=self.dtype,
+            )
+            return {
+                "device_map": {"": str(self.device)},
+                "quantization_config": quantization_config,
+            }
+
+        return {"dtype": self.dtype}
 
     def _bos_ids(self) -> list[int]:
         bos = self.tokenizer.bos_token_id
