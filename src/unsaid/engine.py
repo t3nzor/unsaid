@@ -111,6 +111,7 @@ class HFEngine(CompletionEngine):
         device: str = "auto",
         dtype: str = "auto",
         load_in_4bit: bool = False,
+        hf_token: str | None = None,
     ) -> None:
         if temperature <= 0:
             raise ValueError("temperature must be > 0")
@@ -131,9 +132,12 @@ class HFEngine(CompletionEngine):
         self.dtype = self._resolve_dtype(dtype)
         self.load_in_4bit = load_in_4bit
 
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
+        hub_kwargs = {"token": hf_token} if hf_token else {}
+        self.tokenizer = AutoTokenizer.from_pretrained(model_name, **hub_kwargs)
         model_kwargs = self._model_kwargs()
-        self.model = AutoModelForCausalLM.from_pretrained(model_name, **model_kwargs)
+        self.model = AutoModelForCausalLM.from_pretrained(
+            model_name, **hub_kwargs, **model_kwargs
+        )
         if not self.load_in_4bit:
             self.model.to(self.device)
         self.model.eval()
@@ -315,10 +319,14 @@ class HFEngine(CompletionEngine):
         if probs is None:
             return self.topk(self.encode(text), k)
 
+        vocab = self._vocab()
         prob_list = probs.cpu().tolist()
+        # Some models pad their LM head vocabulary beyond tokenizer length
+        # (e.g. Qwen2.5: 152064 logits vs. 151665 tokenizer entries). Those
+        # extra ids are not decodable tokens, so token healing ignores them.
         matched = [
             (tid, p)
-            for tid, (s, p) in enumerate(zip(self._vocab(), prob_list, strict=True))
+            for tid, (s, p) in enumerate(zip(vocab, prob_list, strict=False))
             if s.startswith(search)
         ]
         if not matched:
@@ -331,7 +339,7 @@ class HFEngine(CompletionEngine):
         cut = len(search)
         out: list[Candidate] = []
         for tid, p in matched:
-            remainder = self._vocab()[tid][cut:]
+            remainder = vocab[tid][cut:]
             # Skip candidates that would render as nothing (e.g. a bare extra
             # space token at a word boundary, where there is no typed prefix).
             if not partial and not remainder:

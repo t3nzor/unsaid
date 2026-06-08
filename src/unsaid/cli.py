@@ -33,6 +33,11 @@ def main(
         "--load-in-4bit/--no-load-in-4bit",
         help="Load model with BitsAndBytes 4-bit NF4 quantization.",
     ),
+    config: str = typer.Option(
+        "",
+        "--config",
+        help="Config TOML path for secrets (default: ~/.config/unsaid/config.toml).",
+    ),
     heal: bool = typer.Option(
         True,
         "--heal/--no-heal",
@@ -44,8 +49,14 @@ def main(
     ),
 ) -> None:
     """Run the live explorer, or print a single distribution with --prompt."""
+    from .config import resolve_hf_token
     from .engine import HFEngine
     from .session import Session
+
+    try:
+        hf_token = resolve_hf_token(config or None)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc), param_hint="--config") from exc
 
     engine = HFEngine(
         model,
@@ -55,6 +66,7 @@ def main(
         device=device,
         dtype=dtype,
         load_in_4bit=load_in_4bit,
+        hf_token=hf_token,
     )
     session = Session(engine, top_k=top_k)
 

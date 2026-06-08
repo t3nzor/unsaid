@@ -18,6 +18,9 @@ Use this interpreter for everything; do NOT use system `python`:
   `--dtype bfloat16`.
 - 4-bit loading is opt-in via `--load-in-4bit`; it uses BitsAndBytes NF4 with
   double quantization and requires the `quant` extra.
+- Hugging Face tokens are resolved from `HF_TOKEN`, then
+  `HUGGING_FACE_HUB_TOKEN`, then `~/.config/unsaid/config.toml` (or `--config`).
+  Never commit a real token; `config.example.toml` is a safe placeholder.
 
 ## Commands
 Install (deps already in the venv; this adds the project, dev tools, and 4-bit support):
@@ -29,6 +32,7 @@ Run:
     /home/t3nzor/venv/bin/python -m unsaid.cli                 # live TUI
     /home/t3nzor/venv/bin/python -m unsaid.cli -p "The quick brown"   # non-interactive top-k
     /home/t3nzor/venv/bin/python -m unsaid.cli --load-in-4bit -p "The quick brown"
+    /home/t3nzor/venv/bin/python -m unsaid.cli --config ~/.config/unsaid/config.toml -p "The quick brown"
 
 Lint / typecheck / test:
 

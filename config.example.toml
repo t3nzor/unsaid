@@ -1,0 +1,5 @@
+# Copy this to ~/.config/unsaid/config.toml and replace the placeholder.
+# Keep the real token out of git.
+
+[huggingface]
+token = "hf_your_token_here"
