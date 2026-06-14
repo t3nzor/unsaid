@@ -1,12 +1,12 @@
-"""Rendering helpers for next-token candidates.
+"""Rendering helpers for completion candidates.
 
 These are pure functions (no torch, no model) so they're cheap to unit-test.
 
 Display conventions
 -------------------
-Candidate text comes from the tokenizer already decoded, so a leading space is
-a real space character and a newline is a real ``\\n``. To keep single-token
-fragments readable in a list we translate whitespace into visible markers:
+Candidate text comes already decoded, so a leading space is a real space
+character and a newline is a real ``\\n``. To keep fragments readable in a list
+we translate whitespace into visible markers:
 
 * a leading space -> ``·`` (middle dot)
 * a newline       -> ``⏎``
@@ -14,13 +14,12 @@ fragments readable in a list we translate whitespace into visible markers:
 
 Word prefix
 -----------
-A predicted token is often a subword fragment (``ie``, ``ing``). On its own it
-is hard to read, so we prepend the *current word prefix* — the trailing run of
-non-whitespace the user is mid-typing — to any candidate that continues that
-word (i.e. does not start with whitespace). ``brown`` + ``ie`` -> ``brownie``.
-Candidates that begin a new token (leading space/newline) are shown as-is. In
-the styled (TUI) output the prefix is dimmed so the predicted token still
-stands out.
+A predicted continuation is often a subword fragment (``ie``, ``ing``). On its
+own it is hard to read, so we prepend the *current word prefix* — the trailing
+run of non-whitespace the user is mid-typing — to any candidate that continues
+that word (i.e. does not start with whitespace). ``brown`` + ``ie`` ->
+``brownie``. In the styled (TUI) output, only the next character that accepting
+the candidate will type is highlighted.
 """
 
 from __future__ import annotations
@@ -30,6 +29,7 @@ from .engine import Candidate, current_word_prefix
 __all__ = [
     "current_word_prefix",
     "visible_token",
+    "candidate_completion",
     "candidate_word",
     "prob_bar",
     "format_candidate",
@@ -67,10 +67,20 @@ def _continues_word(text: str) -> bool:
     return not text[:1].isspace()
 
 
+def candidate_completion(cand: Candidate) -> str:
+    """Return the display continuation for ``cand``.
+
+    Character candidates use ``continuation`` to show the most likely token they
+    can continue to, while ``text`` remains the one-character accepted input.
+    """
+    return cand.continuation if cand.continuation is not None else cand.text
+
+
 def candidate_word(cand: Candidate, prefix: str = "") -> str:
     """The full word a candidate forms, prepending ``prefix`` when it continues it."""
-    token = visible_token(cand.text)
-    if prefix and _continues_word(cand.text):
+    completion = candidate_completion(cand)
+    token = visible_token(completion)
+    if prefix and _continues_word(completion):
         return prefix + token
     return token
 
@@ -119,20 +129,26 @@ def format_candidates_fragments(
     """Format the top-k list as prompt_toolkit ``(style, text)`` fragments.
 
     The already-typed ``prefix`` is given the ``class:prefix`` style (dim) and
-    the predicted token ``class:token`` (highlighted) so the model's actual
-    next token stands out from the word context.
+    the accepted next character uses ``class:token`` (highlighted). Any remaining
+    best-continuation context is shown normally.
     """
     frags: StyledFragments = []
     for rank, cand in enumerate(cands, start=1):
         key = rank % 10
+        completion = candidate_completion(cand)
         token = visible_token(cand.text)
-        show_prefix = bool(prefix) and _continues_word(cand.text)
-        word_len = (len(prefix) if show_prefix else 0) + len(token)
+        suffix = ""
+        if cand.continuation is not None:
+            suffix = visible_token(completion[len(cand.text) :])
+        show_prefix = bool(prefix) and _continues_word(completion)
+        word_len = (len(prefix) if show_prefix else 0) + len(token) + len(suffix)
 
         frags.append(("", f"{key}  "))
         if show_prefix:
             frags.append(("class:prefix", prefix))
         frags.append(("class:token", token))
+        if suffix:
+            frags.append(("", suffix))
         frags.append(("", " " * max(2, _WORD_COL - word_len + 2)))
         frags.append(("class:bar", prob_bar(cand.prob, bar_width)))
         frags.append(("", f"  {cand.prob:.4f}\n"))

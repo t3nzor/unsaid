@@ -10,12 +10,11 @@ Two completion modes
   artifact: typing ``Hel`` is the single token ``Hel``, and the model almost
   never emits ``lo`` after it (it learned the single token ``Hello``), so
   "Hello"/"Help" don't appear.
-* **Token healing** (``complete``, the default): when the cursor sits mid-word,
-  condition on the text *before* the partial word and rank the vocabulary
-  tokens whose text continues what's been typed. This surfaces the words you'd
-  expect (``Hel`` -> ``Hello``, ``Help``, ...). Each candidate's ``text`` is the
-  *remainder* still to be typed, so the UI/accept logic (which prepends the
-  already-typed prefix) works unchanged.
+* **Character completions** (``complete``): rank the next character to type,
+  aggregating the probabilities of all tokens that begin with that character.
+  When token healing is enabled, this aggregation happens over vocabulary tokens
+  that continue the current partial word (``Hel`` -> ``l`` via ``Hello``, ``p``
+  via ``Help``, ...).
 
 The Hugging Face backend can run on CPU or CUDA. ``device="auto"`` picks the
 CUDA device with the most VRAM when CUDA is available, otherwise CPU.
@@ -51,16 +50,19 @@ class Candidate:
     Attributes:
         token_id: The vocabulary id of the token.
         text: The text this candidate contributes *beyond what is already
-            typed*. In raw mode this is the whole next token; in healed mode it
-            is the remainder that completes the current word. May be a subword
-            fragment and may include a leading space.
+            typed*. For ``complete`` results this is one character; for ``topk``
+            results this is the raw next token. May include whitespace.
         prob: Probability assigned to this candidate in ``[0, 1]``. In healed
             mode it is renormalized over the matching completions.
+        continuation: For character candidates, the most likely token remainder
+            that starts with ``text``. Rendering uses it as display context while
+            accepting the candidate still appends only ``text``.
     """
 
     token_id: int
     text: str
     prob: float
+    continuation: str | None = None
 
 
 class CompletionEngine(ABC):
@@ -83,10 +85,10 @@ class CompletionEngine(ABC):
         """
 
     def complete(self, text: str, k: int) -> list[Candidate]:
-        """Return the ``k`` best completions for ``text``.
+        """Return the ``k`` best next-character completions for ``text``.
 
-        Default implementation is the raw next-token distribution. Backends
-        that support token healing override this.
+        Default implementation returns raw next-token candidates. Backends that
+        support character aggregation override this.
         """
         return self.topk(self.encode(text), k)
 
@@ -294,11 +296,65 @@ class HFEngine(CompletionEngine):
             self._vocab_strings = self.tokenizer.batch_decode([[i] for i in range(n)])
         return self._vocab_strings
 
+    def _letter_candidates(
+        self, continuations: list[tuple[int, str, float]], k: int
+    ) -> list[Candidate]:
+        grouped: dict[str, tuple[float, float, int, str]] = {}
+        for tid, continuation, prob in continuations:
+            if not continuation:
+                continue
+            letter = continuation[0]
+            group = grouped.get(letter)
+            if group is None:
+                grouped[letter] = (prob, prob, tid, continuation)
+                continue
+
+            total_prob, best_prob, best_token_id, best_continuation = group
+            if prob > best_prob:
+                grouped[letter] = (total_prob + prob, prob, tid, continuation)
+            else:
+                grouped[letter] = (
+                    total_prob + prob,
+                    best_prob,
+                    best_token_id,
+                    best_continuation,
+                )
+
+        total = sum(total_prob for total_prob, _, _, _ in grouped.values()) or 1.0
+        out = [
+            Candidate(
+                token_id=token_id,
+                text=letter,
+                prob=prob / total,
+                continuation=continuation,
+            )
+            for letter, (prob, _, token_id, continuation) in grouped.items()
+        ]
+        out.sort(key=lambda cand: cand.prob, reverse=True)
+        return out[:k]
+
+    def _raw_letter_candidates(self, token_ids: list[int], k: int) -> list[Candidate]:
+        probs = self._next_token_probs(token_ids)
+        if probs is None:
+            return []
+
+        vocab = self._vocab()
+        prob_list = probs.cpu().tolist()
+        # Some models pad their LM head vocabulary beyond tokenizer length
+        # (e.g. Qwen2.5: 152064 logits vs. 151665 tokenizer entries). Those
+        # extra ids are not decodable tokens, so character aggregation ignores
+        # them.
+        continuations = [
+            (tid, continuation, p)
+            for tid, (continuation, p) in enumerate(zip(vocab, prob_list, strict=False))
+        ]
+        return self._letter_candidates(continuations, k)
+
     def complete(self, text: str, k: int) -> list[Candidate]:
         if k <= 0:
             raise ValueError("k must be > 0")
         if not self.heal:
-            return self.topk(self.encode(text), k)
+            return self._raw_letter_candidates(self.encode(text), k)
 
         partial = current_word_prefix(text)
         before = text[: len(text) - len(partial)]
@@ -313,41 +369,29 @@ class HFEngine(CompletionEngine):
         search = (" " if had_space else "") + partial
         if not search:
             # Nothing to heal (empty buffer, or trailing newline/tab).
-            return self.topk(self.encode(text), k)
+            return self._raw_letter_candidates(self.encode(text), k)
 
         probs = self._next_token_probs(self.encode(stripped))
         if probs is None:
-            return self.topk(self.encode(text), k)
+            return self._raw_letter_candidates(self.encode(text), k)
 
         vocab = self._vocab()
         prob_list = probs.cpu().tolist()
         # Some models pad their LM head vocabulary beyond tokenizer length
         # (e.g. Qwen2.5: 152064 logits vs. 151665 tokenizer entries). Those
         # extra ids are not decodable tokens, so token healing ignores them.
+        cut = len(search)
         matched = [
-            (tid, p)
+            (tid, s[cut:], p)
             for tid, (s, p) in enumerate(zip(vocab, prob_list, strict=False))
-            if s.startswith(search)
+            if s.startswith(search) and s[cut:]
         ]
         if not matched:
             # The boundary has no clean single-token completion; fall back so
             # the panel is never empty.
-            return self.topk(self.encode(text), k)
+            return self._raw_letter_candidates(self.encode(text), k)
 
-        total = sum(p for _, p in matched) or 1.0
-        matched.sort(key=lambda x: x[1], reverse=True)
-        cut = len(search)
-        out: list[Candidate] = []
-        for tid, p in matched:
-            remainder = vocab[tid][cut:]
-            # Skip candidates that would render as nothing (e.g. a bare extra
-            # space token at a word boundary, where there is no typed prefix).
-            if not partial and not remainder:
-                continue
-            out.append(Candidate(token_id=tid, text=remainder, prob=p / total))
-            if len(out) >= k:
-                break
-        return out or self.topk(self.encode(text), k)
+        return self._letter_candidates(matched, k)
 
     def surprisal(self, text: str) -> float:
         """Total surprisal of ``text`` in bits under the model's *true*

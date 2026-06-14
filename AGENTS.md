@@ -1,7 +1,7 @@
 # AGENTS.md
 
 `unsaid` — "Explore the web of the words left unsaid." A CLI that shows the
-LLM's top-k next-token distribution live as you type. Python project.
+LLM's top-k next-character distribution live as you type. Python project.
 
 ## Environment (READ FIRST — non-obvious)
 Use this interpreter for everything; do NOT use system `python`:
@@ -50,7 +50,8 @@ Lint / typecheck / test:
 ## Architecture
 `src/unsaid/` (entrypoint `unsaid = unsaid.cli:app`):
 - `engine.py` — `CompletionEngine` ABC + `HFEngine`. Forward pass → last-pos
-  logits → temperature → softmax → `topk` → decode each token id individually.
+  logits → temperature → softmax → aggregate next-character probabilities over
+  decoded vocabulary entries.
   torch/transformers are imported lazily inside methods so `--help` and the
   pure-module tests stay fast. `surprisal(text)` scores the whole string
   (`-sum log2 P(token|context)`, BOS-primed, in **bits**, at temperature 1).
@@ -61,14 +62,15 @@ Lint / typecheck / test:
 - `cli.py` — typer entrypoint.
 
 ## Conventions
-- **Token healing is the default.** Typing mid-word (`Hel`) shows real word
-  completions (`Hello`, `Help`) instead of raw next tokens. `HFEngine.complete`
-  conditions on the text *before* the trailing fragment, filters the vocabulary
-  to tokens continuing what's typed, and returns the **remainder** (so
-  `Candidate.text` is just the part still to type; the format/accept layers
-  prepend the typed prefix). Healed probabilities are renormalized over the
-  matching set. `--no-heal` / `heal=False` restores the raw next-token
-  distribution.
+- **Token healing is the default.** Typing mid-word (`Hel`) shows next-character
+  probabilities with real word context (`Hello`, `Help`) instead of raw BPE
+  fragments. `HFEngine.complete` conditions on the text *before* the trailing
+  fragment, filters the vocabulary to tokens continuing what's typed, groups
+  those tokens by the next character, and returns that character in
+  `Candidate.text`. `Candidate.continuation` stores the most likely token
+  remainder for display only. Accepting a candidate appends only
+  `Candidate.text`. Healed probabilities are renormalized over the matching
+  set. `--no-heal` / `heal=False` aggregates raw next-token first characters.
   - The same machinery heals a **trailing space** (`Hello `): GPT-2 tokenizes a
     dangling space as its own token and predicts garbage (`_`, `!!!`) after it,
     so a word boundary is healed by conditioning on the preceding word and

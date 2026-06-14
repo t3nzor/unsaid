@@ -42,7 +42,7 @@ def main(
         True,
         "--heal/--no-heal",
         help="Token healing: complete the partial word you're typing "
-        "(--no-heal shows raw next tokens).",
+        "(--no-heal aggregates raw next-token first characters).",
     ),
     prompt: str = typer.Option(
         "", "--prompt", "-p", help="Non-interactive: print top-k for this text and exit."

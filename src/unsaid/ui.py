@@ -30,7 +30,7 @@ from .session import Session
 _STYLE = Style.from_dict(
     {
         "prefix": "#888888",  # already-typed word context: dimmed
-        "token": "bold #00afff",  # the predicted next token: highlighted
+        "token": "bold #00afff",  # the accepted next character: highlighted
         "bar": "#5f8700",
         "header": "#888888",
         "surprisal": "#d78700",

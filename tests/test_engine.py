@@ -62,24 +62,27 @@ def test_heal_surfaces_real_words(engine):
 
 
 def test_heal_remainder_completes_word(engine):
-    # Candidate.text is the *remainder*; prefix + text must reconstruct a word.
+    # Candidate.continuation is display context; prefix + continuation must
+    # reconstruct a word, while Candidate.text is only the next character.
     cands = engine.complete("I went to the libr", 5)
     words = {_word("libr", c) for c in cands}
     assert "library" in words
+    assert all(len(c.text) == 1 for c in cands)
 
 
 def test_heal_probs_renormalized(engine):
     cands = engine.complete("Hel", 10)
-    assert abs(sum(c.prob for c in cands) - 1.0) <= 1.0  # subset of a distribution
+    assert sum(c.prob for c in cands) == pytest.approx(1.0)
     assert all(0.0 <= c.prob <= 1.0 for c in cands)
 
 
-def test_no_heal_falls_back_to_raw(engine):
+def test_no_heal_uses_raw_next_token_context(engine):
     engine.heal = False
     try:
-        healed = engine.complete("Hel", 5)  # heal disabled -> raw next token
-        direct = engine.topk(engine.encode("Hel"), 5)
-        assert [c.token_id for c in healed] == [c.token_id for c in direct]
+        cands = engine.complete("Hel", 5)  # heal disabled -> raw next characters
+        assert len(cands) == 5
+        assert all(len(c.text) == 1 for c in cands)
+        assert all(c.continuation is not None for c in cands)
     finally:
         engine.heal = True
 
@@ -89,10 +92,10 @@ def test_trailing_space_heals_to_new_words(engine):
     # words (leading-space tokens), not garbage from the dangling space token.
     cands = engine.complete("The quick brown fox ", 10)
     assert len(cands) == 10
-    words = [c.text for c in cands]
+    words = [_word("", c) for c in cands]
     # Healed remainders have the leading space stripped and are real words.
     assert any(w.strip().isalpha() for w in words)
-    # No empty/blank candidates (the bare-space token is filtered out).
+    # No empty/blank accepted characters (the bare-space token is filtered out).
     assert all(c.text for c in cands)
 
 
@@ -116,4 +119,3 @@ def test_surprisal_higher_for_unpredictable_text(engine):
     predictable = per_token("The United States of America")
     gibberish = per_token("The qwx zzfp blorgon")
     assert gibberish > predictable
-

@@ -25,6 +25,11 @@ class FakeEngine(CompletionEngine):
         return float(len(text))  # deterministic stand-in for wiring tests
 
 
+class FakeLetterEngine(FakeEngine):
+    def complete(self, text: str, k: int) -> list[Candidate]:
+        return [Candidate(1, "l", 0.8, continuation="lo")]
+
+
 def test_set_text_recomputes():
     s = Session(FakeEngine(), top_k=5)
     cands = s.set_text("hi")
@@ -38,6 +43,13 @@ def test_accept_appends_candidate_text():
     new = s.accept(0)
     assert new == "hi a"
     assert s.text == "hi a"
+
+
+def test_accept_letter_candidate_appends_only_next_character():
+    s = Session(FakeLetterEngine(), top_k=5)
+    s.set_text("Hel")
+
+    assert s.accept_top() == "Hell"
 
 
 def test_accept_top_is_index_zero():
@@ -114,4 +126,3 @@ def test_session_stores_surprisal_and_token_count():
     s.set_text("hello")
     assert s.surprisal == 5.0  # FakeEngine returns len(text)
     assert s.n_tokens == 5  # FakeEngine encodes one id per char
-

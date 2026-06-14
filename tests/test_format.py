@@ -2,6 +2,7 @@
 
 from unsaid.engine import Candidate
 from unsaid.format import (
+    candidate_completion,
     candidate_word,
     current_word_prefix,
     format_candidate,
@@ -60,6 +61,13 @@ def test_candidate_word_prepends_prefix_when_continuing():
     assert candidate_word(Candidate(1, "ie", 0.1), "brown") == "brownie"
 
 
+def test_candidate_completion_uses_continuation_context():
+    cand = Candidate(1, "l", 0.1, continuation="lo")
+
+    assert candidate_completion(cand) == "lo"
+    assert candidate_word(cand, "Hel") == "Hello"
+
+
 def test_candidate_word_skips_prefix_for_new_word():
     # leading-space token starts a new word -> shown with marker, no prefix
     assert candidate_word(Candidate(1, " and", 0.1), "brown") == "·and"
@@ -86,6 +94,18 @@ def test_fragments_dim_prefix_highlight_token():
     assert styles.get("class:token") == "ie"
 
 
+def test_fragments_highlight_only_accepted_character():
+    frags = format_candidates_fragments([Candidate(1, "l", 0.5, continuation="lo")], "Hel")
+
+    assert frags[:5] == [
+        ("", "1  "),
+        ("class:prefix", "Hel"),
+        ("class:token", "l"),
+        ("", "o"),
+        ("", " " * 15),
+    ]
+
+
 def test_format_surprisal_empty():
     assert format_surprisal(0.0, 0) == "surprisal: 0.00 bits"
 
@@ -95,4 +115,3 @@ def test_format_surprisal_includes_per_token():
     assert "20.00 bits" in out
     assert "4.00/token" in out
     assert "5 tok" in out
-
