@@ -65,19 +65,33 @@ class UnsaidApp:
         )
 
     def _get_panel_fragments(self) -> StyledFragments:
+        frags: StyledFragments = []
+        preamble = self.session.engine.initial_prompt
+        if preamble:
+            try:
+                from prompt_toolkit.application import get_app
+                cols = get_app().output.get_size().columns
+            except Exception:
+                cols = 120
+            label = "preamble: "
+            budget = max(20, cols - len(label))
+            display = preamble if len(preamble) <= budget else preamble[: budget - 1] + "\u2026"
+            frags.append(("class:header", label + display + "\n"))
+
         surprisal = format_surprisal(self.session.surprisal, self.session.n_tokens)
         cands = self.session.candidates
         if not cands:
-            return [("class:surprisal", surprisal + "\n"), ("", "(type to begin)")]
+            frags.append(("class:surprisal", surprisal + "\n"))
+            frags.append(("", "(type to begin)"))
+            return frags
         prefix = current_word_prefix(self.session.text)
         start = self.session.page * self.session.top_k + 1
         end = start + len(cands) - 1
-        header = f"ranks {start}-{end} of {len(self.session.pool)}  ·  PgUp/PgDn\n"
-        return [
-            ("class:surprisal", surprisal + "\n"),
-            ("class:header", header),
-            *format_candidates_fragments(cands, prefix),
-        ]
+        header = f"ranks {start}-{end} of {len(self.session.pool)}  \u00b7  PgUp/PgDn\n"
+        frags.append(("class:surprisal", surprisal + "\n"))
+        frags.append(("class:header", header))
+        frags.extend(format_candidates_fragments(cands, prefix))
+        return frags
 
     def _on_text_changed(self, _buf: Buffer) -> None:
         if self._timer is not None:

@@ -47,9 +47,15 @@ def main(
     prompt: str = typer.Option(
         "", "--prompt", "-p", help="Non-interactive: print top-k for this text and exit."
     ),
+    preamble: str = typer.Option(
+        "",
+        "--preamble",
+        help="Hidden text prepended to model context (system prompt). "
+        "Defaults to [unsaid] initial_prompt in the config TOML; this flag overrides it.",
+    ),
 ) -> None:
     """Run the live explorer, or print a single distribution with --prompt."""
-    from .config import resolve_hf_token
+    from .config import load_initial_prompt, resolve_hf_token
     from .engine import HFEngine
     from .session import Session
 
@@ -57,6 +63,15 @@ def main(
         hf_token = resolve_hf_token(config or None)
     except ValueError as exc:
         raise typer.BadParameter(str(exc), param_hint="--config") from exc
+
+    effective_preamble = preamble
+    if not effective_preamble:
+        try:
+            toml_preamble = load_initial_prompt(config or None)
+            if toml_preamble is not None:
+                effective_preamble = toml_preamble
+        except ValueError as exc:
+            raise typer.BadParameter(str(exc), param_hint="--config") from exc
 
     engine = HFEngine(
         model,
@@ -67,6 +82,7 @@ def main(
         dtype=dtype,
         load_in_4bit=load_in_4bit,
         hf_token=hf_token,
+        initial_prompt=effective_preamble,
     )
     session = Session(engine, top_k=top_k)
 
@@ -74,6 +90,8 @@ def main(
         from .format import current_word_prefix, format_candidates, format_surprisal
 
         cands = session.set_text(prompt)
+        if effective_preamble:
+            typer.echo(f"preamble: {effective_preamble!r}")
         typer.echo(f"prefix: {prompt!r}")
         typer.echo(format_surprisal(session.surprisal, session.n_tokens))
         typer.echo(format_candidates(cands, current_word_prefix(prompt)))

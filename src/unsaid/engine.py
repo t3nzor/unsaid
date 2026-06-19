@@ -68,6 +68,8 @@ class Candidate:
 class CompletionEngine(ABC):
     """Backend-agnostic source of next-token / completion distributions."""
 
+    initial_prompt: str = ""
+
     @abstractmethod
     def encode(self, text: str) -> list[int]:
         """Tokenize ``text`` into model token ids."""
@@ -114,6 +116,7 @@ class HFEngine(CompletionEngine):
         dtype: str = "auto",
         load_in_4bit: bool = False,
         hf_token: str | None = None,
+        initial_prompt: str = "",
     ) -> None:
         if temperature <= 0:
             raise ValueError("temperature must be > 0")
@@ -147,6 +150,9 @@ class HFEngine(CompletionEngine):
         # Lazily built map of token id -> decoded text, used for healing.
         self._vocab_strings: list[str] | None = None
 
+        self.initial_prompt = initial_prompt
+        self._preamble_ids: list[int] = self.encode(initial_prompt)
+
     def encode(self, text: str) -> list[int]:
         if text == "":
             return []
@@ -154,6 +160,12 @@ class HFEngine(CompletionEngine):
 
     def decode(self, token_ids: list[int]) -> str:
         return self.tokenizer.decode(token_ids)
+
+    def _context_ids(self, text: str) -> list[int]:
+        preamble_ids = getattr(self, "_preamble_ids", [])
+        if preamble_ids:
+            return preamble_ids + self.encode(text)
+        return self.encode(text)
 
     def _resolve_device(self, device: str):
         torch = self._torch
@@ -354,7 +366,7 @@ class HFEngine(CompletionEngine):
         if k <= 0:
             raise ValueError("k must be > 0")
         if not self.heal:
-            return self._raw_letter_candidates(self.encode(text), k)
+            return self._raw_letter_candidates(self._context_ids(text), k)
 
         partial = current_word_prefix(text)
         before = text[: len(text) - len(partial)]
@@ -369,11 +381,11 @@ class HFEngine(CompletionEngine):
         search = (" " if had_space else "") + partial
         if not search:
             # Nothing to heal (empty buffer, or trailing newline/tab).
-            return self._raw_letter_candidates(self.encode(text), k)
+            return self._raw_letter_candidates(self._context_ids(text), k)
 
-        probs = self._next_token_probs(self.encode(stripped))
+        probs = self._next_token_probs(self._context_ids(stripped))
         if probs is None:
-            return self._raw_letter_candidates(self.encode(text), k)
+            return self._raw_letter_candidates(self._context_ids(text), k)
 
         vocab = self._vocab()
         prob_list = probs.cpu().tolist()
@@ -389,7 +401,7 @@ class HFEngine(CompletionEngine):
         if not matched:
             # The boundary has no clean single-token completion; fall back so
             # the panel is never empty.
-            return self._raw_letter_candidates(self.encode(text), k)
+            return self._raw_letter_candidates(self._context_ids(text), k)
 
         return self._letter_candidates(matched, k)
 
@@ -398,8 +410,9 @@ class HFEngine(CompletionEngine):
         distribution (temperature is not applied here).
 
         Each token is scored given its predecessors; the first token is scored
-        against BOS when the tokenizer provides one. Returns ``0.0`` for text
-        with no scoreable tokens.
+        against BOS when the tokenizer provides one.  When an ``initial_prompt``
+        is set, its tokens are prepended as free conditioning context (never
+        scored).  Returns ``0.0`` for text with no scoreable tokens.
         """
         torch = self._torch
         ids = self.encode(text)
@@ -407,10 +420,13 @@ class HFEngine(CompletionEngine):
             return 0.0
 
         bos = self._bos_ids()
-        seq = bos + ids
-        first = len(bos) if bos else 1  # index of the first token we can score
+        preamble = self._preamble_ids
+        seq = bos + preamble + ids
+        first = len(bos) + len(preamble)
+        if first == 0:
+            first = 1  # no context to score the first token against
         if first >= len(seq):
-            return 0.0  # single token and no BOS context to score it against
+            return 0.0
 
         input_ids = torch.tensor([seq], dtype=torch.long, device=self.device)
         with torch.inference_mode():

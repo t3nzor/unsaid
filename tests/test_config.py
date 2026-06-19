@@ -2,7 +2,7 @@
 
 import pytest
 
-from unsaid.config import load_hf_token, resolve_hf_token
+from unsaid.config import load_hf_token, load_initial_prompt, resolve_hf_token
 
 
 def _clear_hf_env(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -79,3 +79,60 @@ def test_invalid_toml_raises(tmp_path):
 
     with pytest.raises(ValueError, match="invalid config TOML"):
         load_hf_token(config)
+
+
+# --- load_initial_prompt ---
+
+def test_missing_config_initial_prompt_returns_none(tmp_path):
+    assert load_initial_prompt(tmp_path / "missing.toml") is None
+
+
+def test_missing_unsaid_section_returns_none(tmp_path):
+    config = tmp_path / "config.toml"
+    config.write_text('[huggingface]\ntoken = "hf_x"\n')
+
+    assert load_initial_prompt(config) is None
+
+
+def test_missing_initial_prompt_key_returns_none(tmp_path):
+    config = tmp_path / "config.toml"
+    config.write_text('[unsaid]\nother = "value"\n')
+
+    assert load_initial_prompt(config) is None
+
+
+def test_load_initial_prompt(tmp_path):
+    config = tmp_path / "config.toml"
+    config.write_text('[unsaid]\ninitial_prompt = "Hello, world."\n')
+
+    assert load_initial_prompt(config) == "Hello, world."
+
+
+def test_load_initial_prompt_preserves_whitespace(tmp_path):
+    config = tmp_path / "config.toml"
+    config.write_text('[unsaid]\ninitial_prompt = "  spaced out  "\n')
+
+    assert load_initial_prompt(config) == "  spaced out  "
+
+
+def test_load_initial_prompt_empty_string(tmp_path):
+    config = tmp_path / "config.toml"
+    config.write_text('[unsaid]\ninitial_prompt = ""\n')
+
+    assert load_initial_prompt(config) == ""
+
+
+def test_invalid_unsaid_section_raises(tmp_path):
+    config = tmp_path / "config.toml"
+    config.write_text('unsaid = "not a table"\n')
+
+    with pytest.raises(ValueError, match="must be a table"):
+        load_initial_prompt(config)
+
+
+def test_invalid_initial_prompt_type_raises(tmp_path):
+    config = tmp_path / "config.toml"
+    config.write_text('[unsaid]\ninitial_prompt = 123\n')
+
+    with pytest.raises(ValueError, match="must be a string"):
+        load_initial_prompt(config)
