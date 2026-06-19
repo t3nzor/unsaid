@@ -8,4 +8,4 @@ token = "hf_your_token_here"
 # Hidden text prepended to the model's context for every completion
 # (a system / preamble prompt). Conditions both the live TUI and --prompt
 # runs. Empty by default. Overridden by --preamble on the command line.
-initial_prompt = ""
+preamble = ""

@@ -54,12 +54,12 @@ def load_hf_token(config_path: str | Path | None = None) -> str | None:
     return _clean_token(token)
 
 
-def load_initial_prompt(config_path: str | Path | None = None) -> str | None:
-    """Load the initial prompt (preamble) from ``config_path``.
+def load_preamble(config_path: str | Path | None = None) -> str | None:
+    """Load the preamble (initial prompt) from ``config_path``.
 
     The file is optional. When present, the expected format is:
 
-    ``[unsaid]`` with ``initial_prompt = "..."``.
+    ``[unsaid]`` with ``preamble = "..."``.
     """
     path = Path(config_path).expanduser() if config_path is not None else DEFAULT_CONFIG_PATH
     if not path.exists():
@@ -72,11 +72,11 @@ def load_initial_prompt(config_path: str | Path | None = None) -> str | None:
     if not isinstance(unsaid, dict):
         raise ValueError(f"invalid config at {path}: [unsaid] must be a table")
 
-    value = unsaid.get("initial_prompt")
+    value = unsaid.get("preamble")
     if value is None:
         return None
     if not isinstance(value, str):
-        raise ValueError(f"invalid config at {path}: unsaid.initial_prompt must be a string")
+        raise ValueError(f"invalid config at {path}: unsaid.preamble must be a string")
     return value
 
 

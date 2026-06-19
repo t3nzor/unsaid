@@ -17,6 +17,7 @@ from prompt_toolkit.layout import Layout
 from prompt_toolkit.layout.containers import HSplit, Window
 from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
 from prompt_toolkit.layout.dimension import Dimension
+from prompt_toolkit.layout.processors import BeforeInput
 from prompt_toolkit.styles import Style
 
 from .format import (
@@ -24,6 +25,7 @@ from .format import (
     current_word_prefix,
     format_candidates_fragments,
     format_surprisal,
+    visible_token,
 )
 from .session import Session
 
@@ -46,11 +48,18 @@ class UnsaidApp:
 
         self.input = Buffer(multiline=False, on_text_changed=self._on_text_changed)
 
+        preamble = self.session.engine.initial_prompt
+        processors: list = []
+        if preamble:
+            processors.append(
+                BeforeInput(visible_token(preamble) + " ", style="class:prefix")
+            )
+
         kb = self._make_keybindings()
         body = HSplit(
             [
                 Window(
-                    BufferControl(buffer=self.input),
+                    BufferControl(buffer=self.input, input_processors=processors),
                     height=Dimension(min=1, max=3),
                 ),
                 Window(height=1, char="─"),
@@ -65,33 +74,19 @@ class UnsaidApp:
         )
 
     def _get_panel_fragments(self) -> StyledFragments:
-        frags: StyledFragments = []
-        preamble = self.session.engine.initial_prompt
-        if preamble:
-            try:
-                from prompt_toolkit.application import get_app
-                cols = get_app().output.get_size().columns
-            except Exception:
-                cols = 120
-            label = "preamble: "
-            budget = max(20, cols - len(label))
-            display = preamble if len(preamble) <= budget else preamble[: budget - 1] + "\u2026"
-            frags.append(("class:header", label + display + "\n"))
-
         surprisal = format_surprisal(self.session.surprisal, self.session.n_tokens)
         cands = self.session.candidates
         if not cands:
-            frags.append(("class:surprisal", surprisal + "\n"))
-            frags.append(("", "(type to begin)"))
-            return frags
+            return [("class:surprisal", surprisal + "\n"), ("", "(type to begin)")]
         prefix = current_word_prefix(self.session.text)
         start = self.session.page * self.session.top_k + 1
         end = start + len(cands) - 1
         header = f"ranks {start}-{end} of {len(self.session.pool)}  \u00b7  PgUp/PgDn\n"
-        frags.append(("class:surprisal", surprisal + "\n"))
-        frags.append(("class:header", header))
-        frags.extend(format_candidates_fragments(cands, prefix))
-        return frags
+        return [
+            ("class:surprisal", surprisal + "\n"),
+            ("class:header", header),
+            *format_candidates_fragments(cands, prefix),
+        ]
 
     def _on_text_changed(self, _buf: Buffer) -> None:
         if self._timer is not None:

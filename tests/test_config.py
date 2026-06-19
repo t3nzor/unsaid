@@ -2,7 +2,7 @@
 
 import pytest
 
-from unsaid.config import load_hf_token, load_initial_prompt, resolve_hf_token
+from unsaid.config import load_hf_token, load_preamble, resolve_hf_token
 
 
 def _clear_hf_env(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -81,45 +81,45 @@ def test_invalid_toml_raises(tmp_path):
         load_hf_token(config)
 
 
-# --- load_initial_prompt ---
+# --- load_preamble ---
 
-def test_missing_config_initial_prompt_returns_none(tmp_path):
-    assert load_initial_prompt(tmp_path / "missing.toml") is None
+def test_missing_config_preamble_returns_none(tmp_path):
+    assert load_preamble(tmp_path / "missing.toml") is None
 
 
 def test_missing_unsaid_section_returns_none(tmp_path):
     config = tmp_path / "config.toml"
     config.write_text('[huggingface]\ntoken = "hf_x"\n')
 
-    assert load_initial_prompt(config) is None
+    assert load_preamble(config) is None
 
 
-def test_missing_initial_prompt_key_returns_none(tmp_path):
+def test_missing_preamble_key_returns_none(tmp_path):
     config = tmp_path / "config.toml"
     config.write_text('[unsaid]\nother = "value"\n')
 
-    assert load_initial_prompt(config) is None
+    assert load_preamble(config) is None
 
 
-def test_load_initial_prompt(tmp_path):
+def test_load_preamble(tmp_path):
     config = tmp_path / "config.toml"
-    config.write_text('[unsaid]\ninitial_prompt = "Hello, world."\n')
+    config.write_text('[unsaid]\npreamble = "Hello, world."\n')
 
-    assert load_initial_prompt(config) == "Hello, world."
+    assert load_preamble(config) == "Hello, world."
 
 
-def test_load_initial_prompt_preserves_whitespace(tmp_path):
+def test_load_preamble_preserves_whitespace(tmp_path):
     config = tmp_path / "config.toml"
-    config.write_text('[unsaid]\ninitial_prompt = "  spaced out  "\n')
+    config.write_text('[unsaid]\npreamble = "  spaced out  "\n')
 
-    assert load_initial_prompt(config) == "  spaced out  "
+    assert load_preamble(config) == "  spaced out  "
 
 
-def test_load_initial_prompt_empty_string(tmp_path):
+def test_load_preamble_empty_string(tmp_path):
     config = tmp_path / "config.toml"
-    config.write_text('[unsaid]\ninitial_prompt = ""\n')
+    config.write_text('[unsaid]\npreamble = ""\n')
 
-    assert load_initial_prompt(config) == ""
+    assert load_preamble(config) == ""
 
 
 def test_invalid_unsaid_section_raises(tmp_path):
@@ -127,12 +127,12 @@ def test_invalid_unsaid_section_raises(tmp_path):
     config.write_text('unsaid = "not a table"\n')
 
     with pytest.raises(ValueError, match="must be a table"):
-        load_initial_prompt(config)
+        load_preamble(config)
 
 
-def test_invalid_initial_prompt_type_raises(tmp_path):
+def test_invalid_preamble_type_raises(tmp_path):
     config = tmp_path / "config.toml"
-    config.write_text('[unsaid]\ninitial_prompt = 123\n')
+    config.write_text('[unsaid]\npreamble = 123\n')
 
     with pytest.raises(ValueError, match="must be a string"):
-        load_initial_prompt(config)
+        load_preamble(config)

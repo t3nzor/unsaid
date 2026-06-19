@@ -51,11 +51,11 @@ def main(
         "",
         "--preamble",
         help="Hidden text prepended to model context (system prompt). "
-        "Defaults to [unsaid] initial_prompt in the config TOML; this flag overrides it.",
+        "Defaults to [unsaid] preamble in the config TOML; this flag overrides it.",
     ),
 ) -> None:
     """Run the live explorer, or print a single distribution with --prompt."""
-    from .config import load_initial_prompt, resolve_hf_token
+    from .config import load_preamble, resolve_hf_token
     from .engine import HFEngine
     from .session import Session
 
@@ -67,7 +67,7 @@ def main(
     effective_preamble = preamble
     if not effective_preamble:
         try:
-            toml_preamble = load_initial_prompt(config or None)
+            toml_preamble = load_preamble(config or None)
             if toml_preamble is not None:
                 effective_preamble = toml_preamble
         except ValueError as exc:
