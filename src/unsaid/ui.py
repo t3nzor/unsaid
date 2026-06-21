@@ -58,6 +58,7 @@ class UnsaidApp:
                 Window(
                     BufferControl(buffer=self.input),
                     height=Dimension(min=1, max=3),
+                    wrap_lines=True,
                 ),
                 Window(height=1, char="─"),
                 Window(FormattedTextControl(self._get_panel_fragments)),
@@ -105,6 +106,61 @@ class UnsaidApp:
             bypass_readonly=True,
         )
 
+    def _move_visual_line(self, event, *, down: bool) -> None:
+        """Move the cursor one visual (wrapped) line up or down.
+
+        prompt_toolkit's ``auto_up``/``auto_down`` operate on *logical*
+        lines (real ``\\n``).  Here we model the character-wrap layout of the
+        input window so that Up/Down arrows traverse the visual rows produced
+        by ``wrap_lines=True``.
+        """
+        from prompt_toolkit.application import get_app
+
+        try:
+            w = get_app().output.get_size().columns
+        except Exception:
+            w = 80
+        preamble = self.session.engine.initial_prompt
+        prefix_len = len(visible_token(preamble) + " ") if preamble else 0
+
+        c0 = max(1, w - prefix_len)
+        buf = self.input
+        text = buf.text
+        n = len(text)
+        i = buf.cursor_position
+
+        # Current visual (row, screen_col).
+        if i < c0:
+            row, screen_col = 0, prefix_len + i
+        else:
+            rem = i - c0
+            row, screen_col = 1 + rem // w, rem % w
+
+        # Last visual row (cursor at end of text).
+        if n < c0:
+            last_row = 0
+        else:
+            last_row = 1 + (n - c0) // w
+
+        pc = buf.preferred_column if buf.preferred_column is not None else screen_col
+
+        if not down:
+            target_row = row - 1
+        else:
+            target_row = row + 1
+
+        target_row = max(0, min(target_row, last_row))
+
+        if target_row <= 0:
+            user_col = max(0, pc - prefix_len)
+            target_i = min(user_col, c0 - 1, n)
+        else:
+            start = c0 + (target_row - 1) * w
+            target_i = min(start + pc, start + w - 1, n)
+
+        buf.cursor_position = target_i
+        buf.preferred_column = pc
+
     def _make_keybindings(self) -> KeyBindings:
         kb = KeyBindings()
 
@@ -124,6 +180,14 @@ class UnsaidApp:
         @kb.add("pageup")
         def _prev_page(event) -> None:
             self.session.prev_page()
+
+        @kb.add("up")
+        def _up(event) -> None:
+            self._move_visual_line(event, down=False)
+
+        @kb.add("down")
+        def _down(event) -> None:
+            self._move_visual_line(event, down=True)
 
         # Alt+digit accepts the Nth candidate without stealing plain digit
         # typing from the input buffer. 1..9 -> index 0..8, 0 -> index 9.
