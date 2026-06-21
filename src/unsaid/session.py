@@ -18,7 +18,9 @@ from .engine import Candidate, CompletionEngine
 
 
 class Session:
-    def __init__(self, engine: CompletionEngine, *, top_k: int = 10, max_pages: int = 10) -> None:
+    def __init__(
+        self, engine: CompletionEngine, *, top_k: int = 10, max_pages: int = 10, preamble: str = ""
+    ) -> None:
         self.engine = engine
         self.top_k = top_k
         self.max_pages = max_pages
@@ -28,6 +30,8 @@ class Session:
         self.candidates: list[Candidate] = []
         self.surprisal: float = 0.0  # total bits of the running string
         self.n_tokens: int = 0
+        if preamble:
+            self.set_text(preamble)
 
     def set_text(self, text: str) -> list[Candidate]:
         """Replace the buffer text, reset to the first page, and recompute."""

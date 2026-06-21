@@ -126,3 +126,25 @@ def test_session_stores_surprisal_and_token_count():
     s.set_text("hello")
     assert s.surprisal == 5.0  # FakeEngine returns len(text)
     assert s.n_tokens == 5  # FakeEngine encodes one id per char
+
+
+def test_preamble_seeds_buffer_and_recomputes():
+    s = Session(FakeEngine(), top_k=3, preamble="hi")
+    assert s.text == "hi"
+    assert s.surprisal == 2.0  # len("hi")
+    assert s.n_tokens == 2
+    assert len(s.candidates) == 3
+
+
+def test_preamble_included_in_surprisal_after_set_text():
+    s = Session(FakeEngine(), top_k=3, preamble="hi")
+    s.set_text("hi world")
+    assert s.surprisal == 8.0  # len("hi world")
+    assert s.n_tokens == 8
+
+
+def test_empty_preamble_no_initial_recompute():
+    s = Session(FakeEngine(), top_k=3, preamble="")
+    assert s.text == ""
+    assert s.pool == []  # no recompute happened
+    assert s.candidates == []

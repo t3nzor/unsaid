@@ -82,23 +82,24 @@ def main(
         dtype=dtype,
         load_in_4bit=load_in_4bit,
         hf_token=hf_token,
-        initial_prompt=effective_preamble,
     )
-    session = Session(engine, top_k=top_k)
 
     if prompt:
         from .format import current_word_prefix, format_candidates, format_surprisal
 
-        cands = session.set_text(prompt)
+        session = Session(engine, top_k=top_k)
+        full_text = effective_preamble + prompt
+        cands = session.set_text(full_text)
         if effective_preamble:
             typer.echo(f"preamble: {effective_preamble!r}")
-        typer.echo(f"prefix: {prompt!r}")
+        typer.echo(f"text: {full_text!r}")
         typer.echo(format_surprisal(session.surprisal, session.n_tokens))
-        typer.echo(format_candidates(cands, current_word_prefix(prompt)))
+        typer.echo(format_candidates(cands, current_word_prefix(full_text)))
         raise typer.Exit()
 
     from .ui import UnsaidApp
 
+    session = Session(engine, top_k=top_k, preamble=effective_preamble)
     UnsaidApp(session).run()
 
 

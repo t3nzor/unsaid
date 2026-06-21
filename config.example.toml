@@ -5,7 +5,6 @@
 token = "hf_your_token_here"
 
 [unsaid]
-# Hidden text prepended to the model's context for every completion
-# (a system / preamble prompt). Conditions both the live TUI and --prompt
-# runs. Empty by default. Overridden by --preamble on the command line.
+# Editable text that seeds the buffer at startup. Prepended to the model's
+# context and included in surprisal. Overridden by --preamble on the command line.
 preamble = ""

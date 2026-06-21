@@ -12,12 +12,12 @@ import threading
 
 from prompt_toolkit.application import Application
 from prompt_toolkit.buffer import Buffer
+from prompt_toolkit.document import Document
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.layout import Layout
 from prompt_toolkit.layout.containers import HSplit, Window
 from prompt_toolkit.layout.controls import BufferControl, FormattedTextControl
 from prompt_toolkit.layout.dimension import Dimension
-from prompt_toolkit.layout.processors import BeforeInput
 from prompt_toolkit.styles import Style
 
 from .format import (
@@ -25,7 +25,6 @@ from .format import (
     current_word_prefix,
     format_candidates_fragments,
     format_surprisal,
-    visible_token,
 )
 from .session import Session
 
@@ -46,20 +45,18 @@ class UnsaidApp:
         self.debounce_s = debounce_s
         self._timer: threading.Timer | None = None
 
-        self.input = Buffer(multiline=False, on_text_changed=self._on_text_changed)
-
-        preamble = self.session.engine.initial_prompt
-        processors: list = []
-        if preamble:
-            processors.append(
-                BeforeInput(visible_token(preamble) + " ", style="class:prefix")
-            )
+        initial = self.session.text
+        self.input = Buffer(
+            multiline=False,
+            on_text_changed=self._on_text_changed,
+            document=Document(initial, len(initial)) if initial else None,
+        )
 
         kb = self._make_keybindings()
         body = HSplit(
             [
                 Window(
-                    BufferControl(buffer=self.input, input_processors=processors),
+                    BufferControl(buffer=self.input),
                     height=Dimension(min=1, max=3),
                 ),
                 Window(height=1, char="─"),

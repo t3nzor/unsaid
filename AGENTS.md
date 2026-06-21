@@ -86,13 +86,11 @@ Lint / typecheck / test:
   change, not per page. Editing or accepting resets to page 0. Accept indices
   are relative to the *current page*. (Token healing often yields a tiny pool,
   so paging mainly matters between words / with `--no-heal`.)
-- **`--preamble` / `[unsaid] preamble`** conditions every `complete` and
-  `surprisal` call without appearing in the editable buffer.  Preamble tokens are
-  free context — `surprisal` scores only the user's typed text (preamble is never
-  counted in `n_tokens` or bits).  The TUI shows it as a dim, non-editable inline
-  prefix in the input field (multi-line preambles are collapsed to one visible
-  line).  CLI `--preamble` overrides TOML; both TUI and `--prompt` one-shot mode
-  apply it.  `CompletionEngine` ABC carries an `initial_prompt: str` class
-  attribute (default `""`) so `FakeEngine` and test doubles stay compatible.
+- **`--preamble` / `[unsaid] preamble`** seeds the initial editable buffer text.
+  It conditions every `complete` call and is **included** in `surprisal` (preamble
+  tokens count toward `n_tokens` and bits, since the preamble is part of the
+  buffer).  The TUI opens with the preamble pre-filled and editable like any other
+  buffer content.  CLI `--preamble` overrides TOML; both TUI and `--prompt`
+  one-shot mode apply it.
 - Tests that need a model are marked `slow`; pure logic tests use a `FakeEngine`
   / no torch and must stay fast.
