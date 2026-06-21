@@ -120,10 +120,8 @@ class UnsaidApp:
             w = get_app().output.get_size().columns
         except Exception:
             w = 80
-        preamble = self.session.engine.initial_prompt
-        prefix_len = len(visible_token(preamble) + " ") if preamble else 0
 
-        c0 = max(1, w - prefix_len)
+        c0 = max(1, w)
         buf = self.input
         text = buf.text
         n = len(text)
@@ -131,7 +129,7 @@ class UnsaidApp:
 
         # Current visual (row, screen_col).
         if i < c0:
-            row, screen_col = 0, prefix_len + i
+            row, screen_col = 0, i
         else:
             rem = i - c0
             row, screen_col = 1 + rem // w, rem % w
@@ -152,7 +150,7 @@ class UnsaidApp:
         target_row = max(0, min(target_row, last_row))
 
         if target_row <= 0:
-            user_col = max(0, pc - prefix_len)
+            user_col = max(0, pc)
             target_i = min(user_col, c0 - 1, n)
         else:
             start = c0 + (target_row - 1) * w
