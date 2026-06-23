@@ -25,8 +25,10 @@ BitsAndBytes NF4 quantization.
 from __future__ import annotations
 
 import math
+import random
 import re
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass
 from importlib.util import find_spec
 
@@ -98,6 +100,22 @@ class CompletionEngine(ABC):
         Default is ``0.0``; model backends override it.
         """
         return 0.0
+
+    def sample_reply(
+        self,
+        text: str,
+        *,
+        max_tokens: int = 40,
+        rng: random.Random,
+        on_token: Callable[[str, str], None] | None = None,
+        is_cancelled: Callable[[], bool] | None = None,
+    ) -> str:
+        """Sample a short reply continuation of ``text``.
+
+        Default no-op; model backends override this. Returns the newly sampled
+        text (not including ``text``).
+        """
+        return ""
 
 
 class HFEngine(CompletionEngine):
@@ -425,3 +443,43 @@ class HFEngine(CompletionEngine):
         token_logp = predictors.gather(1, targets.unsqueeze(1)).squeeze(1)
         nats = -float(token_logp.sum())
         return nats / math.log(2)
+
+    def sample_reply(
+        self,
+        text: str,
+        *,
+        max_tokens: int = 40,
+        rng: random.Random,
+        on_token: Callable[[str, str], None] | None = None,
+        is_cancelled: Callable[[], bool] | None = None,
+    ) -> str:
+        """Sample a short reply continuation of ``text``.
+
+        Autoregressive multinomial sampling from the full vocabulary using
+        ``rng``. Stops at the first sentence-ending punctuation (``.``, ``!``,
+        ``?``) after a minimum of 2 tokens, any ``\\n`` (not added), or
+        ``max_tokens`` reached.  Uses ``self.temperature`` for the softmax.
+        """
+        out = ""
+        n_sampled = 0
+        vocab_size = len(self.tokenizer)
+        while n_sampled < max_tokens:
+            if is_cancelled is not None and is_cancelled():
+                break
+            ids = self.encode(text + out)
+            probs = self._next_token_probs(ids)
+            if probs is None:
+                break
+            # Some models pad logits beyond tokenizer length; ignore extras.
+            prob_list = probs.cpu().tolist()[:vocab_size]
+            tid = rng.choices(range(vocab_size), weights=prob_list, k=1)[0]
+            decoded = self.tokenizer.decode([tid])
+            if "\n" in decoded:
+                break
+            out += decoded
+            n_sampled += 1
+            if on_token is not None:
+                on_token(out, decoded)
+            if n_sampled >= 2 and out.rstrip().endswith((".", "!", "?")):
+                break
+        return out

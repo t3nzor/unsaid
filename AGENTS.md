@@ -92,5 +92,12 @@ Lint / typecheck / test:
   buffer).  The TUI opens with the preamble pre-filled and editable like any other
   buffer content.  CLI `--preamble` overrides TOML; both TUI and `--prompt`
   one-shot mode apply it.
-- Tests that need a model are marked `slow`; pure logic tests use a `FakeEngine`
+- **Enter streams a sampled reply.** Pressing Enter triggers full-distribution
+  multinomial sampling (``random.SystemRandom``) that streams token-by-token
+  into the buffer, stopping at the first sentence-ending punctuation
+  (``.``/``!``/``?``, minimum 2 tokens) or 40-token cap; ``\\n`` tokens are
+  silently dropped.  The existing ``--temperature`` flag is reused.  Surprisal
+  and ``n_tokens`` update once after the stream completes.  The panel shows
+  ``sampling…`` during generation; keystrokes are ignored until it finishes.
+- Tests that need a model are marked ``slow``; pure logic tests use a ``FakeEngine``
   / no torch and must stay fast.

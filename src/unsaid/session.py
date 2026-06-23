@@ -14,6 +14,9 @@ model. Editing the text (or accepting a candidate) resets to the first page.
 
 from __future__ import annotations
 
+import random
+from collections.abc import Callable
+
 from .engine import Candidate, CompletionEngine
 
 
@@ -86,3 +89,21 @@ class Session:
     def accept_top(self) -> str:
         """Append the most likely candidate on the current page (used by Tab)."""
         return self.accept(0)
+
+    def sample_reply(
+        self,
+        *,
+        rng: random.Random | None = None,
+        on_token: Callable[[str, str], None] | None = None,
+    ) -> str:
+        """Sample a short reply continuation, append it, recompute.
+
+        The optional ``on_token`` callback receives ``(accumulated, token_text)``
+        for each sampled token so the caller can stream the output.
+        Returns the new buffer text.
+        """
+        rng = rng or random.SystemRandom()
+        reply = self.engine.sample_reply(self.text, rng=rng, on_token=on_token)
+        if reply:
+            self.set_text(self.text + reply)
+        return self.text

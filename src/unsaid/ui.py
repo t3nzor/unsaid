@@ -44,6 +44,7 @@ class UnsaidApp:
         self.session = session
         self.debounce_s = debounce_s
         self._timer: threading.Timer | None = None
+        self._sampling: bool = False
 
         initial = self.session.text
         self.input = Buffer(
@@ -72,6 +73,8 @@ class UnsaidApp:
         )
 
     def _get_panel_fragments(self) -> StyledFragments:
+        if self._sampling:
+            return [("class:surprisal", "sampling…\n")]
         surprisal = format_surprisal(self.session.surprisal, self.session.n_tokens)
         cands = self.session.candidates
         if not cands:
@@ -87,6 +90,8 @@ class UnsaidApp:
         ]
 
     def _on_text_changed(self, _buf: Buffer) -> None:
+        if self._sampling:
+            return
         if self._timer is not None:
             self._timer.cancel()
         self._timer = threading.Timer(self.debounce_s, self._recompute_async)
@@ -159,6 +164,48 @@ class UnsaidApp:
         buf.cursor_position = target_i
         buf.preferred_column = pc
 
+    def _start_sampling(self) -> None:
+        """Called by the Enter keybinding; spawns a streaming sampler."""
+        if self._sampling:
+            return
+        self._sampling = True
+        self.app.invalidate()
+
+        t = threading.Thread(target=self._sample_worker, daemon=True)
+        t.start()
+
+    def _sample_worker(self) -> None:
+        """Background thread: sample a reply with per-token streaming."""
+        loop = self.app.loop
+        base_text = self.session.text
+
+        def on_token(accumulated: str, _token_text: str) -> None:
+            full = base_text + accumulated
+
+            def update() -> None:
+                self._apply_buffer_text(full)
+
+            if loop is not None and not loop.is_closed():
+                loop.call_soon_threadsafe(update)
+
+        self.session.sample_reply(on_token=on_token)
+
+        self._sampling = False
+
+        def finish() -> None:
+            self.app.invalidate()
+
+        if loop is not None and not loop.is_closed():
+            loop.call_soon_threadsafe(finish)
+
+    def _apply_buffer_text(self, text: str) -> None:
+        """Set the input buffer text (cursor at end) — runs on UI thread."""
+        self.input.set_document(
+            self.input.document.__class__(text, len(text)),
+            bypass_readonly=True,
+        )
+        self.app.invalidate()
+
     def _make_keybindings(self) -> KeyBindings:
         kb = KeyBindings()
 
@@ -170,6 +217,10 @@ class UnsaidApp:
         @kb.add("tab")
         def _accept_top(event) -> None:
             self._accept_and_sync(0)
+
+        @kb.add("enter")
+        def _sample(event) -> None:
+            self._start_sampling()
 
         @kb.add("pagedown")
         def _next_page(event) -> None:
